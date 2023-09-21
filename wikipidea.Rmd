@@ -1,0 +1,89 @@
+---
+title: "wikipida"
+author: "Aswin Kithalawaarachchi"
+date: "2023-09-20"
+output: html_document
+---
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(readr)
+library(tidyverse)
+
+library(VennDiagram)
+
+
+# Load the datasets
+wikipedia <- read_csv("wikipedia.csv", col_names=FALSE)
+train_1 <- read_csv("train_1.csv")
+train_2 <- read_csv("train_2.csv")
+
+# Extract unique page titles from wikipedia.csv
+wiki_titles <- unique(wikipedia$X1)
+
+# Filter train_1 and train_2 based on these titles
+filtered_train_1 <- train_1 %>% filter(Page %in% wiki_titles)
+filtered_train_2 <- train_2 %>% filter(Page %in% wiki_titles)
+
+
+```
+```{r}
+
+
+
+train_2_long <- filtered_train_2 %>% 
+  gather(key = "Date", value = "Views", -Page)
+
+wikipedia_long <- wikipedia %>%
+  gather(key = "Date", value = "Views", -`X1`)
+
+
+
+
+# For train_2
+ggplot(train_2_long, aes(x = Date, y = Views, group = Page)) + 
+  geom_line(alpha = 0.1) +
+  labs(title = "Time Series for Train 2", x = "Date", y = "Views")
+
+
+
+# Plot the wikipedia data
+ggplot(wikipedia_long, aes(x = Date, y = Views, group = `X1`)) + 
+  geom_line(alpha = 0.1) +
+  labs(title = "Time Series for Wikipedia Data", x = "Date", y = "Views")
+
+
+
+
+
+
+
+
+
+
+```
+```{r}
+
+
+# Identify common pages
+common_pages <- intersect(unique(wikipedia$X1), unique(train_2$Page))
+
+# Take the first common page as an example
+page_name <- common_pages[1]
+
+# Extract views for the chosen page from both datasets
+wiki_views <- filter(wikipedia_long, X1 == page_name)$Views
+train_2_views <- filter(train_2_long, Page == page_name)$Views
+
+# Compute the cross-correlation
+ccf_result <- ccf(wiki_views, train_2_views, lag.max = 365, plot = TRUE)
+
+# Get the lag with the highest correlation
+best_lag <- which.max(ccf_result$acf)
+
+# Print the best lag
+best_lag
+
+```
+
