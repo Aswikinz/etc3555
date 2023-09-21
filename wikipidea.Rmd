@@ -11,25 +11,17 @@ library(dplyr)
 library(readr)
 library(tidyverse)
 
-library(VennDiagram)
 
 
 # Load the datasets
 wikipedia <- read_csv("wikipedia.csv", col_names=FALSE)
-train_1 <- read_csv("train_1.csv")
-train_2 <- read_csv("train_2.csv")
-
-# Extract unique page titles from wikipedia.csv
-wiki_titles <- unique(wikipedia$X1)
-
-# Filter train_1 and train_2 based on these titles
-filtered_train_1 <- train_1 %>% filter(Page %in% wiki_titles)
-filtered_train_2 <- train_2 %>% filter(Page %in% wiki_titles)
 
 
 ```
 ```{r}
 
+filtered_train_1 <- read_csv("filtered_train_1.csv")
+filtered_train_2 <- read_csv("filtered_train_2.csv")
 
 
 train_2_long <- filtered_train_2 %>% 
@@ -53,16 +45,25 @@ ggplot(wikipedia_long, aes(x = Date, y = Views, group = `X1`)) +
   geom_line(alpha = 0.1) +
   labs(title = "Time Series for Wikipedia Data", x = "Date", y = "Views")
 
-
-
-
-
-
-
-
-
-
 ```
+
+```{r get the country/device}
+country_class <- function (name) {
+  name_and_country_code <- str_split(name, "[.]")[1]
+  thingies <- str_split(name_and_country_code, "_")
+  token_len <- len(thingies)
+  
+  return (thingies[token_len])
+}
+
+device_class <- function (name) {
+  device_code <- str_split(name, "[.]")[2]
+  
+  return (device_code)
+}
+```
+
+
 ```{r}
 
 
