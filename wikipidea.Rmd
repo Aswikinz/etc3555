@@ -10,42 +10,64 @@ output: html_document
 library(dplyr)
 library(readr)
 library(tidyverse)
-
-
-
-# Load the datasets
-wikipedia <- read_csv("wikipedia.csv", col_names=FALSE)
-
-
+library(urca)
+library(fpp3)
 ```
 ```{r}
+# Load the datasets
+wiki_df <- read_csv('wikipedia.csv', col_names=FALSE)
+train_df <- read_csv('filtered_train_2.csv')
 
-filtered_train_1 <- read_csv("filtered_train_1.csv")
-filtered_train_2 <- read_csv("filtered_train_2.csv")
+# Extract the first time series from both datasets
+wiki_series <- as.numeric(wiki_df[2, -1])
+train_series <- as.numeric(train_df[2, -1])
 
+# Normalize the series
+wiki_series <- scale(wiki_series)
+train_series <- scale(train_series)
 
-train_2_long <- filtered_train_2 %>% 
-  gather(key = "Date", value = "Views", -Page)
+# Initialize variables to store maximum correlation and its corresponding lag
+max_corr <- -1
+max_lag <- 0
 
-wikipedia_long <- wikipedia %>%
-  gather(key = "Date", value = "Views", -`X1`)
+# Loop over possible lags and calculate correlation for each lag
+for (lag in 0:(min(length(wiki_series), length(train_series)) - 1)) {
+  wiki_subseries <- wiki_series[(lag + 1):(min(length(wiki_series), length(train_series) + lag))]
+  train_subseries <- train_series[1:(min(length(wiki_series) - lag, length(train_series)))]
+  
+  # Ensure the lengths of the series are equal before calculating the correlation
+  if(length(wiki_subseries) == length(train_subseries)) {
+    # Calculate correlation for the current lag
+    current_corr <- cor(wiki_subseries, train_subseries)
+    
+    # Update maximum correlation and its corresponding lag if the current correlation is greater
+    if (current_corr > max_corr) {
+      max_corr <- current_corr
+      max_lag <- lag
+    }
+  }
+}
 
+# Calculate the start date for the Wikipedia series based on the optimal lag
+start_date <- as.Date(names(train_df)[2]) + max_lag
 
+# Generate the date range for the Wikipedia series
+wiki_dates <- seq(start_date, by='day', length.out=ncol(wiki_df) - 1)  # Correcting the length of the date sequence
 
+# Create a new DataFrame for the Wikipedia dataset with the estimated dates as columns
+wiki_df_with_dates <- as.data.frame(cbind(Page=wiki_df$X1, as.data.frame(matrix(unlist(wiki_df[-1]), nrow=nrow(wiki_df), byrow=T))))
 
-# For train_2
-ggplot(train_2_long, aes(x = Date, y = Views, group = Page)) + 
-  geom_line(alpha = 0.1) +
-  labs(title = "Time Series for Train 2", x = "Date", y = "Views")
+# Assign the generated dates as column names
+colnames(wiki_df_with_dates)[-1] <- as.character(wiki_dates)
 
-
-
-# Plot the wikipedia data
-ggplot(wikipedia_long, aes(x = Date, y = Views, group = `X1`)) + 
-  geom_line(alpha = 0.1) +
-  labs(title = "Time Series for Wikipedia Data", x = "Date", y = "Views")
+# View the resulting DataFrame
+head(wiki_df_with_dates)
 
 ```
+
+
+
+
 
 ```{r get the country/device}
 country_class <- function (name) {
@@ -64,27 +86,9 @@ device_class <- function (name) {
 ```
 
 
-```{r}
 
 
-# Identify common pages
-common_pages <- intersect(unique(wikipedia$X1), unique(train_2$Page))
 
-# Take the first common page as an example
-page_name <- common_pages[1]
 
-# Extract views for the chosen page from both datasets
-wiki_views <- filter(wikipedia_long, X1 == page_name)$Views
-train_2_views <- filter(train_2_long, Page == page_name)$Views
 
-# Compute the cross-correlation
-ccf_result <- ccf(wiki_views, train_2_views, lag.max = 365, plot = TRUE)
-
-# Get the lag with the highest correlation
-best_lag <- which.max(ccf_result$acf)
-
-# Print the best lag
-best_lag
-
-```
 
