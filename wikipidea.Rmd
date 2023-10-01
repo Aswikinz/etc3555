@@ -13,6 +13,22 @@ library(tidyverse)
 library(urca)
 library(fpp3)
 ```
+```{r get the country/device}
+country_class <- function (name) {
+  name_and_country_codes <- str_split(name, "[.]wikipedia[.]org") %>%
+    map(first)
+  country_codes <- str_split(name_and_country_codes, "_") %>%
+    map(last)
+  
+  return (country_codes)
+}
+
+device_class <- function (name) {
+  str_split(name, "[.]wikipedia[.]org_") %>%
+    map(last)
+}
+```
+
 ```{r}
 # Load the datasets
 wiki_df <- read_csv('wikipedia.csv', col_names=FALSE)
@@ -55,7 +71,17 @@ start_date <- as.Date(names(train_df)[2]) + max_lag
 wiki_dates <- seq(start_date, by='day', length.out=ncol(wiki_df) - 1)  # Correcting the length of the date sequence
 
 # Create a new DataFrame for the Wikipedia dataset with the estimated dates as columns
-wiki_df_with_dates <- as.data.frame(cbind(Page=wiki_df$X1, as.data.frame(matrix(unlist(wiki_df[-1]), nrow=nrow(wiki_df), byrow=T))))
+wiki_df_with_dates <- as.data.frame(
+  cbind(
+    Page=wiki_df$X1,
+    as.data.frame(
+      matrix(
+        unlist(wiki_df[-1]),
+        nrow=nrow(wiki_df),
+        byrow=T)
+      )
+    )
+  )
 
 # Assign the generated dates as column names
 colnames(wiki_df_with_dates)[-1] <- as.character(wiki_dates)
@@ -65,25 +91,34 @@ head(wiki_df_with_dates)
 
 ```
 
+```{r remove non-wikipedia sites}
+wikipedia_site_regex <- "[.]wikipedia[.]org"
 
-
-
-
-```{r get the country/device}
-country_class <- function (name) {
-  name_and_country_code <- str_split(name, "[.]")[1]
-  thingies <- str_split(name_and_country_code, "_")
-  token_len <- len(thingies)
-  
-  return (thingies[token_len])
-}
-
-device_class <- function (name) {
-  device_code <- str_split(name, "[.]")[2]
-  
-  return (device_code)
-}
+filtered_wiki_df_with_dates <- wiki_df_with_dates %>% 
+  filter(str_detect(Page, wikipedia_site_regex))
 ```
+
+```{r add country/device}
+names <- filtered_wiki_df_with_dates$Page
+
+countries <- country_class(names)
+
+devices <- device_class(names)
+
+wiki_df_with_dates_country_device <- filtered_wiki_df_with_dates %>% 
+  mutate(country = countries, device = devices) %>%
+  relocate(c(country, device), .after=Page)
+```
+
+```{r remove spider pages}
+filtered_wiki_df_with_dates_country_device <- wiki_df_with_dates_country_device %>% 
+  filter(device != "all-access_spider")
+```
+
+
+
+
+
 
 
 
