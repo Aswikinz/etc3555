@@ -13,6 +13,8 @@ library(tidyverse)
 library(urca)
 library(fpp3)
 ```
+
+
 ```{r get the country/device}
 country_class <- function (name) {
   name_and_country_codes <- str_split(name, "[.]wikipedia[.]org") %>%
@@ -117,7 +119,34 @@ filtered_wiki_df_with_dates_country_device <- wiki_df_with_dates_country_device 
 
 
 
+```{r pivot the data fro arima}
+dataset_long <- filtered_wiki_df_with_dates %>%
+  pivot_longer(cols = starts_with('2017'), names_to = 'Date', values_to = 'Web_Traffic') %>%
+  mutate(Date = as.Date(Date, format = '%Y-%m-%d'))
+```
 
+
+```{r}
+#this is a test version
+
+dataset_long <- dataset_long %>% filter(Page %in% unique(Page)[1:5])
+
+# Convert to tsibble
+dataset_ts <- as_tsibble(dataset_long, index = Date, key = Page)
+
+# Fit ARIMA model and forecast, allowing fable to auto select the ARIMA order
+models <- dataset_ts %>%
+  model(ARIMA(Web_Traffic ~ 1))
+
+# Forecasting for 30 days
+forecasts <- models %>% forecast(h = '30 days')
+
+# Visualize forecasts without prediction intervals
+autoplot(dataset_ts, Web_Traffic) +
+  autolayer(forecasts, .mean) + 
+  theme_minimal() +
+  labs(title = 'Web Traffic Forecast', y = 'Web Traffic')
+```
 
 
 
