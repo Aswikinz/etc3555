@@ -159,7 +159,9 @@ testing_split <- df_long %>% group_by(name, country, device) %>%
 
 
 
-```{r ets using df_long}
+```{r ets using df_long , eval = FALSE}
+#u dont have to run this chunk, its already been processed and saved, skip to the next 
+
 plan(multisession)
 
 # Ensure 'models/' and 'forecasts/' directories exist
