@@ -114,9 +114,9 @@ pages <- filtered_wiki_df_with_dates$Page
 
 names <- get_name(pages)
 
-countries <- country_class(pages)
+countries <- get_country(pages)
 
-devices <- device_class(pages)
+devices <- get_device(pages)
 
 wiki_df_with_dates_country_device <- filtered_wiki_df_with_dates %>% 
   mutate(name = names, country = countries, device = devices) %>%
