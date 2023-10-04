@@ -156,7 +156,32 @@ testing_split <- df_long %>% group_by(name, country, device) %>%
   slice(training_split_index + 1: n_dates)
 ```
 
+```{r new split training and testing dataset}
+# Discuss which code chunk to use for training and testing data
+# Define the split training row index
+n_dates <- ncol(filtered_wiki_df_with_dates_country_device) - 4
+training_split_index <- ceiling(0.7 * n_dates)
 
+df_train <- filtered_wiki_df_with_dates_country_device %>%
+  dplyr::select(1:training_split_index) %>% # select columns including the first 606 dates 
+  pivot_longer(
+  cols = -c(Page, name, country, device),
+  names_to = "date",
+  values_to = "clicks"
+)
+
+
+df_test <- filtered_wiki_df_with_dates_country_device %>%
+  dplyr::select(-5:-training_split_index) %>% 
+  pivot_longer(
+  cols = -c(Page, name, country, device),
+  names_to = "date",
+  values_to = "clicks"
+)
+
+head(df_test)
+  
+```
 
 
 ```{r ets using df_long , eval = FALSE}
