@@ -265,6 +265,114 @@ testing_wide <- testing_split %>% pivot_wider(names_from = date, values_from = c
 
 
 
+```{r}
+
+# Scale your data (replace with your scaling logic)
+scaled_train_data <- scale(train_data)
+scaled_test_data <- scale(test_data)
+
+# Create sequences (adjust window_size accordingly)
+window_size <- 10
+X_train <- array(0, dim = c(nrow(scaled_train_data) - window_size + 1, window_size, ncol(scaled_train_data)))
+Y_train <- matrix(0, nrow = nrow(scaled_train_data) - window_size + 1, ncol = ncol(scaled_train_data))
+for (i in 1:(nrow(scaled_train_data) - window_size + 1)) {
+  X_train[i,,] <- scaled_train_data[i:(i + window_size - 1), ]
+  Y_train[i,] <- scaled_train_data[i + window_size, ]
+}
+X_test <- array(0, dim = c(nrow(scaled_test_data) - window_size + 1, window_size, ncol(scaled_test_data)))
+Y_test <- matrix(0, nrow = nrow(scaled_test_data) - window_size + 1, ncol = ncol(scaled_test_data))
+
+for (i in 1:(nrow(scaled_test_data) - window_size + 1)) {
+  X_test[i,,] <- scaled_test_data[i:(i + window_size - 1), ]
+  Y_test[i,] <- scaled_test_data[i + window_size, ]
+}
+
+```
+
+
+
+
+```{r neuron network model 1}
+
+# Intialise the list for comparision between 2 models
+model_list <- list()
+
+model_list[["Model 1"]]$model <- keras_model_sequential() %>%
+  layer_dense(units = 500, activation = 'relu', input_shape = c(520,3))%>% # input_shape = dates in X_train
+  layer_dropout(rate = 0.5) %>%
+  layer_dense(units = 390, activation = 'relu') %>%
+  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 256, activation = 'relu') %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 128, activation = 'tanh')
+```
+  
+```{r}
+model_list[["Model 1"]]$model_compiled <-  model_list[["Model 1"]]$model %>%
+  compile(loss = "mean_squared_error",
+    optimizer = 'adam',
+    metrics = c("accuracy"))
+```
+
+
+```{r train the model}
+
+model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
+  fit(df_train,
+      df_test,
+      epoch = 2, # number of iteration
+      batch_size = 128,
+      validation_split = 0.2)
+
+```
+
+
+```{r evaluation}
+evaluate_df <- function(model){
+  evaluate(model, X_test, Y_test, verbose = 0) %>%
+    bind_rows()
+}
+
+# Convert list to data frame 
+model_df <- data_frame(
+  name = fct_inorder(names(model_list)),
+  model = map(model_list, "model"),
+  fit = map(model_list, "fit")
+) %>%
+  mutate(eval = map(model, evaluate_df)) %>%
+  unnest(eval)
+
+# Loss and accuracy plot
+model_df %>%
+  mutate(metrics = map(fit, function(x){data.frame(x)})) %>%
+  select(name, metrics) %>%
+  unnest(metrics) %>%
+  ggplot(aes(x = epoch, y = value, colour = data)) +
+  geom_line() +
+  facet_grid(metric~name, scales = "free_y")
+
+# Loss and accuracy summary
+model_df %>%
+  select(name, loss, accuracy) %>%
+  knitr::kable(caption = "Loss and Accuracy for 2 models")
+
+# Compare loss and accuracy between models 
+model_df %>%
+  select(name, loss, accuracy) %>%
+  gather(var,val, -name) %>%
+  ggplot(aes(x = name, y = val)) +
+  geom_col(colour = "blue", fill = "blue", alpha = 0.2, width = 0) +
+  geom_point(colour = "blue") +
+  facet_wrap(~var, scales = "free_x") +
+  coord_flip()
+
+```
+
+
+
+
+
+
 
 
 
