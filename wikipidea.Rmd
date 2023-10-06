@@ -16,7 +16,7 @@ library(naniar)
 library(future)
 library(furrr)
 library(keras)
-
+library(zoo)
 ```
 
 
@@ -152,6 +152,56 @@ Avg_Web_Traffic %>%
   
 ```
 
+```{r}
+# Melting the data to have it in a long format suitable for time series analysis
+data_long <- wiki_df_with_dates_country_device %>% 
+  pivot_longer(cols = starts_with("2017")|starts_with("2018")|starts_with("2019")|starts_with("2020"),
+               names_to = "date", values_to = "page_visits") %>% 
+  mutate(date = as.Date(date, format = "%Y-%m-%d"))
+  
+```
+
+```{r}
+data_long <- data_long %>%
+  mutate(weekday = weekdays(date),
+         month = month(date, label = TRUE))
+
+```
+
+```{r}
+data_long <- data_long %>%
+  arrange(date) %>%
+  group_by(Page) %>%
+  mutate(trend = row_number())
+
+```
+
+```{r}
+data_long <- data_long %>%
+  arrange(Page, date) %>%
+  group_by(Page) %>%
+  mutate(lag_1 = lag(page_visits, n = 1),
+         lag_7 = lag(page_visits, n = 7))
+
+```
+
+```{r}
+data_long <- data_long %>%
+  arrange(Page, date) %>%
+  group_by(Page) %>%
+  mutate(roll_mean_7 = rollmean(page_visits, 7, fill = NA),
+         roll_std_7 = rollapply(page_visits, 7, sd, fill = NA))
+
+```
+```{r}
+data_long <- data_long %>%
+  arrange(Page, date) %>%
+  group_by(Page) %>%
+  mutate(growth_rate = (page_visits - lag(page_visits, n = 1)) / lag(page_visits, n = 1) * 100)
+
+```
+
+
 
 
 ```{r}
@@ -191,6 +241,9 @@ accuracy_ets <- accuracy(forecast_ets, test_data)
 # Check and compare accuracy measures
 accuracy_arima
 accuracy_ets
+
+```
+```{r}
 
 ```
 
