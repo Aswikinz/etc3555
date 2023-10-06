@@ -152,6 +152,49 @@ Avg_Web_Traffic %>%
   
 ```
 
+
+
+```{r}
+
+# Example data: replace this part with your actual data loading
+# mydata <- data.frame(date=..., value=...)
+
+# Convert the data frame into a tsibble object
+Avg_Web_Traffic_tsibble <- Avg_Web_Traffic %>%
+  as_tsibble(index = Date)
+
+# Perform train-test split: 70% train, 30% test
+split_index <- floor(0.70 * nrow(Avg_Web_Traffic_tsibble))
+train_data <- Avg_Web_Traffic_tsibble[1:split_index,]
+test_data <- Avg_Web_Traffic_tsibble[(split_index+1):nrow(Avg_Web_Traffic_tsibble),]
+
+# Fit ARIMA and ETS models
+fit_arima <- train_data %>%
+  model(ARIMA(Avg_Web_Traffic))
+  
+fit_ets <- train_data %>%
+  model(ETS(Avg_Web_Traffic))
+
+# Forecast
+h <- nrow(test_data)  # forecast horizon is the size of the test set
+
+forecast_arima <- fit_arima %>% 
+  forecast(h = h)
+  
+forecast_ets <- fit_ets %>% 
+  forecast(h = h)
+
+# Calculate RMSE and other accuracy measures
+accuracy_arima <- accuracy(forecast_arima, test_data)
+accuracy_ets <- accuracy(forecast_ets, test_data)
+
+# Check and compare accuracy measures
+accuracy_arima
+accuracy_ets
+
+```
+
+
 ```{r plot features from graph}
 # Don't use this chunk, still trying out things
 filtered_wiki_df_with_dates_country_device %>%
@@ -255,73 +298,6 @@ head(df_test)
   
 ```
 
-
-```{r ets using df_long , eval = FALSE}
-#u dont have to run this chunk, its already been processed and saved, skip to the next 
-
-plan(multisession)
-
-# Ensure 'models/' and 'forecasts/' directories exist
-dir.create("models", showWarnings = FALSE)
-dir.create("forecasts", showWarnings = FALSE)
-
-df_long_filter <- df_long %>%
-  select(Page, date, clicks) %>%
-  mutate(date = as.Date(date, format="%Y-%m-%d"))
-
-# Convert the data into a tsibble object (time series tibble)
-data_tsibble <- df_long_filter %>% 
-  as_tsibble(index = date, key = Page)
-
-pages <- unique(df_long$Page)
-
-page_filenames <- make.names(pages, unique = TRUE)
-
-# Fit models in parallel and save them to RDS files
-future_map2(pages, page_filenames, function(page, filename) {
-  # Filter data for the specific page
-  page_data <- data_tsibble %>% filter(Page == page)
-  
-  # Fit the ETS model
-  model <- page_data %>%
-    model(ETS(clicks))
-  
-  # Save the model to an RDS file, named by page
-  saveRDS(model, paste0("models/", filename, ".rds"))
-})
-
-# Generate forecasts in parallel and save them
-future_map(page_filenames, function(filename) {
-  # Load the model from the RDS file
-  model <- readRDS(paste0("models/", filename, ".rds"))
-  
-  # Generate forecasts
-  forecasts <- model %>% forecast(h = "30 days")
-  
-  # Save the forecasts to an RDS file
-  saveRDS(forecasts, paste0("forecasts/", filename, ".rds"))
-})
-
-# When needed, load forecasts and combine them for plotting/analysis
-forecasts_list <- future_map(page_filenames, ~readRDS(paste0("forecasts/", .x, ".rds")))
-forecasts_combined <- bind_rows(forecasts_list)
-
-
-```
-
-
-```{r load the dataframe back from the files}
-# File paths
-forcast_files <- list.files(path = "forecasts/", pattern = "*.rds", full.names = TRUE)
-model_files <- list.files(path = "models/", pattern = "*.rds", full.names = TRUE)
-
-# Read and bind data
-forcast_list <- lapply(forcast_files, readRDS)
-model_list <- lapply(model_files, readRDS)
-
-forcast_ets_df <- bind_rows(forcast_list)
-model_ets_df <- bind_rows(model_list)
-```
 
 
 
