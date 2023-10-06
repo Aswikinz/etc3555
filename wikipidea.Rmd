@@ -17,22 +17,23 @@ library(future)
 library(furrr)
 library(keras)
 library(zoo)
+library(purrr)
 ```
 
 
 ```{r get the language / device}
 get_language <- function (name) {
   name_and_language_codes <- str_split(name, "[.]wikipedia[.]org") %>%
-    map(first)
+    map_chr(first)
   language_codes <- str_split(name_and_language_codes, "_") %>%
-    map(last)
+    map_chr(last)
   
   return (language_codes)
 }
 
 get_device <- function (name) {
   str_split(name, "[.]wikipedia[.]org_") %>%
-    map(last)
+    map_chr(last)
 }
 
 get_name <- function (name) {
@@ -44,6 +45,7 @@ get_name <- function (name) {
   
 }
 ```
+
 
 ```{r}
 # Load the datasets
@@ -158,6 +160,8 @@ data_long <- wiki_df_with_dates_country_device %>%
   pivot_longer(cols = starts_with("2017")|starts_with("2018")|starts_with("2019")|starts_with("2020"),
                names_to = "date", values_to = "page_visits") %>% 
   mutate(date = as.Date(date, format = "%Y-%m-%d"))
+
+
   
 ```
 
@@ -165,6 +169,8 @@ data_long <- wiki_df_with_dates_country_device %>%
 data_long <- data_long %>%
   mutate(weekday = weekdays(date),
          month = month(date, label = TRUE))
+
+
 
 ```
 
@@ -174,6 +180,7 @@ data_long <- data_long %>%
   group_by(Page) %>%
   mutate(trend = row_number())
 
+
 ```
 
 ```{r}
@@ -182,6 +189,8 @@ data_long <- data_long %>%
   group_by(Page) %>%
   mutate(lag_1 = lag(page_visits, n = 1),
          lag_7 = lag(page_visits, n = 7))
+
+head(data_long)
 
 ```
 
@@ -193,12 +202,14 @@ data_long <- data_long %>%
          roll_std_7 = rollapply(page_visits, 7, sd, fill = NA))
 
 ```
+
 ```{r}
 data_long <- data_long %>%
   arrange(Page, date) %>%
   group_by(Page) %>%
   mutate(growth_rate = (page_visits - lag(page_visits, n = 1)) / lag(page_visits, n = 1) * 100)
 
+head(data_long)
 ```
 
 
@@ -243,55 +254,7 @@ accuracy_arima
 accuracy_ets
 
 ```
-```{r}
 
-```
-
-
-```{r plot features from graph}
-# Don't use this chunk, still trying out things
-filtered_wiki_df_with_dates_country_device %>%
-  filter(Page == "Michael_J._Fox_en.wikipedia.org_all-access_all-agents") %>%
-  pivot_longer(cols = -c(Page, name, language, device), names_to = 'Date', values_to = 'Web_Traffic') %>%
-  mutate(Date = as.Date(Date, format = '%Y-%m-%d')) %>%
-  ggplot(aes(x = language, y = Web_Traffic)) +
-  geom_boxplot()
-
-unique(filtered_wiki_df_with_dates_country_device$language)
-en_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "en", 5:869])  
-de_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "de", 5:869])
-es_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "es", 5:869])
-ja_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "ja", 5:869])
-ru_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "ru", 5:869])
-zh_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "zh", 5:869])
-fr_l <- colMeans(filtered_wiki_df_with_dates_country_device[filtered_wiki_df_with_dates_country_device$language == "fr", 5:869])
-
-all_dates <- filtered_wiki_df_with_dates_country_device %>%
-  filter(Page == "Michael_J._Fox_en.wikipedia.org_all-access_all-agents") %>%
-  pivot_longer(cols = -c(Page, name, language, device), names_to = 'Date', values_to = 'Web_Traffic') %>%
-  mutate(Date = as.Date(Date, format = '%Y-%m-%d')) %>%
-  select(Date)
-
-
-
-
-# Create data frame
-language_df <- data_frame(Dates = all_dates$Date,
-                          en = en_l,
-                          de = de_l,
-                          es = es_l,
-                          ja = ja_l,
-                          ru = ru_l,
-                          zh = zh_l,
-                          fr = fr_l)
-
-language_df %>%
-  ggplot(aes(x = Dates)) +
-  geom_boxplot()
-  
-  
-
-```
 
 
 ```{r pivot the data fro arima}
