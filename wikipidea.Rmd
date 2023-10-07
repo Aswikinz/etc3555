@@ -165,57 +165,24 @@ data_long <- wiki_df_with_dates_country_device %>%
   
 ```
 
-```{r}
-data_long <- data_long %>%
-  mutate(weekday = weekdays(date),
-         month = month(date, label = TRUE))
-
-
-
-```
 
 ```{r}
-data_long <- data_long %>%
-  arrange(date) %>%
-  group_by(Page) %>%
-  mutate(trend = row_number())
+ets_comps <- read_csv("data_with_ETS_components.csv")
+data_long_unique <- data_long %>% distinct(Page, .keep_all = T) %>% select(-date,-page_visits)
 
-
-```
-
-```{r}
-data_long <- data_long %>%
-  arrange(Page, date) %>%
-  group_by(Page) %>%
-  mutate(lag_1 = lag(page_visits, n = 1),
-         lag_7 = lag(page_visits, n = 7))
-
-head(data_long)
-
-```
-
-```{r}
-data_long <- data_long %>%
-  arrange(Page, date) %>%
-  group_by(Page) %>%
-  mutate(roll_mean_7 = rollmean(page_visits, 7, fill = NA),
-         roll_std_7 = rollapply(page_visits, 7, sd, fill = NA))
-
-```
-
-```{r}
-data_long <- data_long %>%
-  arrange(Page, date) %>%
-  group_by(Page) %>%
-  mutate(growth_rate = (page_visits - lag(page_visits, n = 1)) / lag(page_visits, n = 1) * 100)
-
-head(data_long)
+ets_comp_joined_df <- data_long %>%
+  distinct(Page, .keep_all = TRUE) %>%
+  select(-date, -page_visits) %>%
+  left_join(ets_comps, by = "Page") %>%
+  mutate(ETS_content = str_extract(`ETS(clicks)`, "(?<=ETS\\()[A-Z,]+(?=\\))")) %>%
+  separate(ETS_content, into = c("error", "trend", "seasonality"), sep = ",") %>%
+  select(-`ETS(clicks)`)
 ```
 
 
 
 
-```{r}
+```{r average ETS and ARIMA}
 
 # Example data: replace this part with your actual data loading
 # mydata <- data.frame(date=..., value=...)
