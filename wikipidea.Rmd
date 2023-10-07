@@ -10,14 +10,17 @@ output: html_document
 library(dplyr)
 library(readr)
 library(tidyverse)
+library(ggplot2)
 library(urca)
 library(fpp3)
+library(fable)
 library(naniar)
 library(future)
 library(furrr)
 library(keras)
 library(zoo)
 library(purrr)
+library(caret)
 ```
 
 
@@ -151,7 +154,7 @@ nrow(Avg_Web_Traffic)
 Avg_Web_Traffic %>%
   ggplot() +
   geom_line(aes(x = Date, y = Avg_Web_Traffic))
-  
+
 ```
 
 ```{r}
@@ -177,7 +180,10 @@ ets_comp_joined_df <- data_long %>%
   mutate(ETS_content = str_extract(`ETS(clicks)`, "(?<=ETS\\()[A-Z,]+(?=\\))")) %>%
   separate(ETS_content, into = c("error", "trend", "seasonality"), sep = ",") %>%
   select(-`ETS(clicks)`)
+head(ets_comp_joined_df)
+dim(ets_comp_joined_df)
 ```
+
 
 
 
@@ -223,19 +229,22 @@ accuracy_ets
 ```
 
 
+```{r}
+# Data Visualization purpose
+Avg_Web_Traffic_with_yearmonth <- Avg_Web_Traffic%>%
+  mutate(Year = as.numeric(format(Date,'%Y')),
+         Month = as.numeric(format(Date,'%m ')))
 
-```{r pivot the data fro arima}
-dataset_long <- filtered_wiki_df_with_dates %>%
-  pivot_longer(cols = starts_with('2017'), names_to = 'Date', values_to = 'Web_Traffic') %>%
-  mutate(Date = as.Date(Date, format = '%Y-%m-%d'))
-
-
+Avg_Web_Traffic_with_yearmonth %>%
+  ggplot(aes(x = Month, y = Avg_Web_Traffic)) +
+  geom_bar(stat = "identity") + 
+  facet_wrap(~ Year, nrow = 1)
 
 ```
 
 
 ```{r}
-
+# Maybe don't need this code chunk 
 df_long <- filtered_wiki_df_with_dates_country_device %>% pivot_longer(
   cols = -c(Page, name, language, device),
   names_to = "date",
@@ -254,73 +263,66 @@ testing_split <- df_long %>% group_by(name, country, device) %>%
   slice(training_split_index + 1: n_dates)
 ```
 
-```{r new split training and testing dataset}
-# Discuss which code chunk to use for training and testing data
-# Define the split training row index
-n_dates <- ncol(filtered_wiki_df_with_dates_country_device) - 4
-training_split_index <- ceiling(0.7 * n_dates)
-
-df_train <- filtered_wiki_df_with_dates_country_device %>%
-  dplyr::select(1:training_split_index) %>% # select columns including the first 606 dates 
-  pivot_longer(
-  cols = -c(Page, name, country, device),
-  names_to = "date",
-  values_to = "clicks"
-)
-
-
-df_test <- filtered_wiki_df_with_dates_country_device %>%
-  dplyr::select(-5:-training_split_index) %>% 
-  pivot_longer(
-  cols = -c(Page, name, country, device),
-  names_to = "date",
-  values_to = "clicks"
-)
-
-head(df_test)
-  
-```
-
-
-
-
-
-
 
 ```{r}
+# Maybe don't need this code chunk 
 training_wide <- training_split %>% pivot_wider(names_from = date, values_from = clicks)
 
 testing_wide <- testing_split %>% pivot_wider(names_from = date, values_from = clicks)
 ```
 
 
+```{r add lags to avg}
 
+ACF(Avg_Web_Traffic_tsibble) %>%
+  autoplot()
+# spikes in lag 13 and 15 are significant 
 
-```{r}
+# Specify the lag values 
+lag_13 <- 13
+lag_15 <- 15
 
-# Scale your data (replace with your scaling logic)
-scaled_train_data <- df_train
-scaled_test_data <- df_test
+Avg_Web_Traffic_lags <- Avg_Web_Traffic_with_yearmonth %>%
+  # Create lagged columns for both lag values
+  mutate(Avg_Web_Traffic_lag_13 = lag(Avg_Web_Traffic, order_by = Date, n = lag_13),
+         Avg_Web_Traffic_lag_15 = lag(Avg_Web_Traffic, order_by = Date, n = lag_15)) %>%
+  # Handle missing values by replacing them with 0
+  mutate(Avg_Web_Traffic_lag_13 = ifelse(is.na(Avg_Web_Traffic_lag_13), 0, Avg_Web_Traffic_lag_13),
+         Avg_Web_Traffic_lag_15 = ifelse(is.na(Avg_Web_Traffic_lag_15), 0, Avg_Web_Traffic_lag_15))
 
-# Create sequences (adjust window_size accordingly)
-window_size <- 10
-X_train <- array(0, dim = c(nrow(scaled_train_data) - window_size + 1, window_size, ncol(scaled_train_data)))
-Y_train <- matrix(0, nrow = nrow(scaled_train_data) - window_size + 1, ncol = ncol(scaled_train_data))
-for (i in 1:(nrow(scaled_train_data) - window_size + 1)) {
-  X_train[i,,] <- scaled_train_data[i:(i + window_size - 1), ]
-  Y_train[i,] <- scaled_train_data[i + window_size, ]
-}
-X_test <- array(0, dim = c(nrow(scaled_test_data) - window_size + 1, window_size, ncol(scaled_test_data)))
-Y_test <- matrix(0, nrow = nrow(scaled_test_data) - window_size + 1, ncol = ncol(scaled_test_data))
-
-for (i in 1:(nrow(scaled_test_data) - window_size + 1)) {
-  X_test[i,,] <- scaled_test_data[i:(i + window_size - 1), ]
-  Y_test[i,] <- scaled_test_data[i + window_size, ]
-}
-
+Avg_Web_Traffic_lags
 ```
 
 
+```{r Preparing data}
+
+X <- Avg_Web_Traffic_lags[, c("Avg_Web_Traffic_lag_13", "Avg_Web_Traffic_lag_15")]
+Y <- Avg_Web_Traffic_lags$Avg_Web_Traffic
+
+# Normalize the input features
+X <- scale(X)
+
+# Define the sequence length (e.g., 30 days for a month)
+sequence_length <- 30
+
+# Create sequences for training
+X_train_seq <- array(0, dim = c(nrow(Avg_Web_Traffic_lags) - sequence_length + 1, sequence_length, ncol(X)))
+Y_train_seq <- numeric(nrow(Avg_Web_Traffic_lags) - sequence_length + 1)
+
+for (i in 1:(nrow(Avg_Web_Traffic_lags) - sequence_length + 1)) {
+  X_train_seq[i,,] <- X[i:(i + sequence_length - 1), ]
+  Y_train_seq[i] <- Y[i + sequence_length - 20]  # Forecasting 20 days ahead
+}
+
+# Split the data into training and testing sets
+train_size <- 0.8  # 80% for training, 20% for testing
+train_samples <- round(train_size * length(Y_train_seq))
+
+X_train <- X_train_seq[1:train_samples, , ]
+X_test <- X_train_seq[(train_samples + 1):nrow(X_train_seq), , ]
+Y_train <- Y_train_seq[1:train_samples]
+Y_test <- Y_train_seq[(train_samples + 1):length(Y_train_seq)]
+```
 
 
 ```{r neuron network model 1}
@@ -328,17 +330,16 @@ for (i in 1:(nrow(scaled_test_data) - window_size + 1)) {
 # Intialise the list for comparision between 2 models
 model_list <- list()
 
+# ChatGPT
 model_list[["Model 1"]]$model <- keras_model_sequential() %>%
-  layer_dense(units = 500, activation = 'relu', input_shape = c(520,3))%>% # input_shape = dates in X_train
-  layer_dropout(rate = 0.5) %>%
-  layer_dense(units = 390, activation = 'relu') %>%
+  layer_lstm(units = 360, input_shape = c(sequence_length, 2), return_sequences = TRUE) %>%
   layer_dropout(rate = 0.4) %>%
-  layer_dense(units = 256, activation = 'relu') %>%
+  layer_lstm(units = 150, return_sequences = TRUE) %>%
   layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 128, activation = 'tanh')
+  layer_dense(units = 1, activation = 'tanh')
 ```
   
-```{r}
+```{r compile the models}
 model_list[["Model 1"]]$model_compiled <-  model_list[["Model 1"]]$model %>%
   compile(loss = "mean_squared_error",
     optimizer = 'adam',
@@ -346,17 +347,18 @@ model_list[["Model 1"]]$model_compiled <-  model_list[["Model 1"]]$model %>%
 ```
 
 
-```{r train the model}
+```{r train the models}
 
 model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
-  fit(df_train,
-      df_test,
-      epoch = 2, # number of iteration
-      batch_size = 128,
-      validation_split = 0.2)
+  fit(
+  X_train, Y_train,
+  epochs = 10,  # You can adjust the number of epochs
+  batch_size = 128,  # You can adjust the batch size
+  validation_data = list(X_test, Y_test),
+  verbose = 2
+)
 
 ```
-
 
 ```{r evaluation}
 evaluate_df <- function(model){
