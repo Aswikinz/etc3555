@@ -60,7 +60,7 @@ model <- keras_model_sequential() %>%
 model %>% compile(
   optimizer = optimizer_adam(learning_rate = 0.001),
   loss = 'mse',
-  metrics = c('mae')
+  metrics = c('accuracy')
 )
 
 
@@ -113,89 +113,23 @@ p1
 if (!is.null(p2)) p2
 
 ```
+```{r}
+# Assuming `predictions` are your model's predictions and `y_test` are the actual values
 
-
-``{r}
-library(keras)
-library(tidyr)
-library(dplyr)
-
-
-
-# Extract page names
-page_names <- unique(data$name)
-
-# Initialize a dataframe to store accuracy measures
-accuracy_df <- data.frame(page=character(), train_mae=numeric(), test_mae=numeric(), stringsAsFactors=FALSE)
-
-# Directory to save models
-save_dir <- "~/my_saved_models/"
-
-# Loop through each page, train a model, and save it
-for (page in page_names) {
-  
-  # Extract data for the current page
-  page_data <- data[data$name == page, 7:ncol(data)]
-  
-  # Convert data frame to a vector (assuming we're working with 1D time series)
-  page_data <- as.vector(t(page_data))
-  
-  # Transform data: Create sequences of 7 days as input (X) and the 8th day as output (Y)
-  n <- length(page_data)
-  X <- sapply(1:(n-7), function(i) page_data[i:(i+6)])
-  Y <- page_data[8:n]
-  
-  # Train-test split (e.g., use the first 80% of data points for training)
-  train_size <- floor(0.8 * ncol(X))
-  X_train <- X[, 1:train_size]
-  Y_train <- Y[1:train_size]
-  X_test <- X[, (train_size + 1):ncol(X)]
-  Y_test <- Y[(train_size + 1):length(Y)]
-  
-  # Define model architecture
-  model <- keras_model_sequential() %>%
-    layer_dense(units = 64, activation = 'relu', input_shape = 7) %>%
-    layer_dense(units = 64, activation = 'relu') %>%
-    layer_dense(units = 1)
-  
-  # Compile model
-  model %>% compile(
-    optimizer = optimizer_adam(learning_rate = 0.001),
-    loss = "mean_squared_error",
-    metric = "mean_absolute_error"
-  )
-  
-  # Train model
-  history <- model %>% fit(
-    x = t(X_train), y = Y_train, 
-    epochs = 50, batch_size = 32, 
-    validation_split = 0.2
-  )
-  
-  # Predict and evaluate
-  preds_train <- model %>% predict(t(X_train))
-  preds_test <- model %>% predict(t(X_test))
-  
-  train_mae <- mean(abs(preds_train - Y_train))
-  test_mae <- mean(abs(preds_test - Y_test))
-  
-  # Ensure the directory exists
-  dir.create(save_dir, showWarnings = FALSE)
-  
-  # Save model
-  save_model_hdf5(model, paste0(save_dir, page, "_model.keras"))
-  
-  # Store accuracy measures
-  accuracy_df <- rbind(accuracy_df, data.frame(page=page, train_mae=train_mae, test_mae=test_mae))
-  
-  # Clean up resources
-  k_clear_session()
+# Ensure predictions are the same length as y_test
+if(length(predictions) != length(y_test)) {
+  stop("Predictions and actual values have different lengths!")
 }
 
-# Display accuracy measures
-print(accuracy_df)
+# Compute Metrics
+mae <- mean(abs(predictions - y_test))  # Mean Absolute Error
+mse <- mean((predictions - y_test)^2)    # Mean Squared Error
+rmse <- sqrt(mse)                        # Root Mean Squared Error
+
+# Print Metrics
+cat("Mean Absolute Error: ", mae, "\n")
+cat("Mean Squared Error: ", mse, "\n")
+cat("Root Mean Squared Error: ", rmse, "\n")
 
 ```
-
-
 
