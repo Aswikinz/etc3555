@@ -53,14 +53,14 @@ y_test <- as.matrix(final_data[-sample_index, ncol(final_data)])
 # Define the model
 model <- keras_model_sequential() %>%
   layer_dense(units = 64, activation = 'relu', input_shape = ncol(x_train)) %>%
-  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dense(units = 64, activation = 'relu') %>%
   layer_dense(units = 1)
 
 # Compile the model
 model %>% compile(
   optimizer = optimizer_adam(learning_rate = 0.001),
   loss = 'mse',
-  metrics = c('accuracy')
+  metrics = c('mae')
 )
 
 
@@ -131,5 +131,14 @@ cat("Mean Absolute Error: ", mae, "\n")
 cat("Mean Squared Error: ", mse, "\n")
 cat("Root Mean Squared Error: ", rmse, "\n")
 
+```
+
+```{r}
+
+
+mean <- apply(x_train, 2, mean)
+std <- apply(train_data, 2, sd)
+data <- scale(data, center = mean, scale = std) 
+celsius_mae <- 0.29 * std[[2]] 
 ```
 
