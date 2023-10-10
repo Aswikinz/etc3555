@@ -137,6 +137,7 @@ wiki_df_with_dates_country_device <- filtered_wiki_df_with_dates %>%
 filtered_wiki_df_with_dates_country_device <- wiki_df_with_dates_country_device %>% 
   filter(device != "all-access_spider")
 head(filtered_wiki_df_with_dates_country_device)
+
 ```
 
 ```{r}
@@ -163,8 +164,6 @@ data_long <- wiki_df_with_dates_country_device %>%
   pivot_longer(cols = starts_with("2017")|starts_with("2018")|starts_with("2019")|starts_with("2020"),
                names_to = "date", values_to = "page_visits") %>% 
   mutate(date = as.Date(date, format = "%Y-%m-%d"))
-
-
   
 ```
 
@@ -242,127 +241,99 @@ Avg_Web_Traffic_with_yearmonth %>%
 
 ```
 
-
 ```{r}
-# Maybe don't need this code chunk 
-df_long <- filtered_wiki_df_with_dates_country_device %>% pivot_longer(
-  cols = -c(Page, name, language, device),
-  names_to = "date",
-  values_to = "clicks"
-)
+data <- filtered_wiki_df_with_dates_country_device
 
-head(df_long)
+# Convert string variables to factors
+data <- data %>%
+  select(-c("Page", "name"))
+data$language <- as.factor(data$language)
+data$device <- as.factor(data$device)
 
-n_dates <- nrow(filtered_wiki_df_with_dates_country_device) - 4
-training_split_index <- ceiling(0.7 * n_dates)
-  
-training_split <- df_long %>% group_by(name, country, device) %>% 
-  slice(1:training_split_index)
+# Encode categorical variables
+dmy <- dummyVars(" ~ .", data = data[,1:2])
+encoded_data <- data.frame(predict(dmy, newdata = data[,1:2]))
 
-testing_split <- df_long %>% group_by(name, country, device) %>% 
-  slice(training_split_index + 1: n_dates)
-```
+# Extract and normalize time series data
+time_series_data <- data[, 3:ncol(data)]
+normalized_time_series <- scale(time_series_data)
 
+# Combine encoded and normalized data
+final_data <- cbind(encoded_data, normalized_time_series)
+dim(final_data)
 
-```{r}
-# Maybe don't need this code chunk 
-training_wide <- training_split %>% pivot_wider(names_from = date, values_from = clicks)
-
-testing_wide <- testing_split %>% pivot_wider(names_from = date, values_from = clicks)
-```
-
-
-```{r add lags to avg}
-
-ACF(Avg_Web_Traffic_tsibble) %>%
-  autoplot()
-# spikes in lag 13 and 15 are significant 
-
-# Specify the lag values 
-lag_13 <- 13
-lag_15 <- 15
-
-Avg_Web_Traffic_lags <- Avg_Web_Traffic_with_yearmonth %>%
-  # Create lagged columns for both lag values
-  mutate(Avg_Web_Traffic_lag_13 = lag(Avg_Web_Traffic, order_by = Date, n = lag_13),
-         Avg_Web_Traffic_lag_15 = lag(Avg_Web_Traffic, order_by = Date, n = lag_15)) %>%
-  # Handle missing values by replacing them with 0
-  mutate(Avg_Web_Traffic_lag_13 = ifelse(is.na(Avg_Web_Traffic_lag_13), 0, Avg_Web_Traffic_lag_13),
-         Avg_Web_Traffic_lag_15 = ifelse(is.na(Avg_Web_Traffic_lag_15), 0, Avg_Web_Traffic_lag_15))
-
-Avg_Web_Traffic_lags
-```
-
-
-```{r Preparing data}
-
-X <- Avg_Web_Traffic_lags[, c("Avg_Web_Traffic_lag_13", "Avg_Web_Traffic_lag_15")]
-Y <- Avg_Web_Traffic_lags$Avg_Web_Traffic
-
-# Normalize the input features
-X <- scale(X)
-
-# Define the sequence length (e.g., 30 days for a month)
-sequence_length <- 30
-
-# Create sequences for training
-X_train_seq <- array(0, dim = c(nrow(Avg_Web_Traffic_lags) - sequence_length + 1, sequence_length, ncol(X)))
-Y_train_seq <- numeric(nrow(Avg_Web_Traffic_lags) - sequence_length + 1)
-
-for (i in 1:(nrow(Avg_Web_Traffic_lags) - sequence_length + 1)) {
-  X_train_seq[i,,] <- X[i:(i + sequence_length - 1), ]
-  Y_train_seq[i] <- Y[i + sequence_length - 20]  # Forecasting 20 days ahead
-}
 
 # Split the data into training and testing sets
-train_size <- 0.8  # 80% for training, 20% for testing
-train_samples <- round(train_size * length(Y_train_seq))
+set.seed(123) 
+sample_index <- sample(seq_len(nrow(final_data)), size = floor(0.8 * nrow(final_data)))
 
-X_train <- X_train_seq[1:train_samples, , ]
-X_test <- X_train_seq[(train_samples + 1):nrow(X_train_seq), , ]
-Y_train <- Y_train_seq[1:train_samples]
-Y_test <- Y_train_seq[(train_samples + 1):length(Y_train_seq)]
+x_train <- as.matrix(final_data[sample_index, -ncol(final_data)])
+y_train <- as.matrix(final_data[sample_index, ncol(final_data)])
+
+x_test <- as.matrix(final_data[-sample_index, -ncol(final_data)])
+y_test <- as.matrix(final_data[-sample_index, ncol(final_data)])
+
+dim(x_train)
+dim(y_train)
+dim(x_test)
+dim(y_test)
+
 ```
 
-
-```{r neuron network model 1}
-
+```{r}
 # Intialise the list for comparision between 2 models
 model_list <- list()
 
-# ChatGPT
+# Define the model 1 
+
 model_list[["Model 1"]]$model <- keras_model_sequential() %>%
-  layer_lstm(units = 360, input_shape = c(sequence_length, 2), return_sequences = TRUE) %>%
-  layer_dropout(rate = 0.4) %>%
-  layer_lstm(units = 150, return_sequences = TRUE) %>%
+  layer_dense(units = 64, activation = 'relu', input_shape = ncol(x_train)) %>%
+  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dense(units = 1) %>% 
+  # compile the model
+  compile(
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  loss = 'mse',
+  metrics = c('mae'))
+
+# Train model 1
+model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>% 
+  fit(x_train, y_train,
+      epochs = 50,
+      batch_size = 32,
+      validation_split = 0.2)
+
+```
+
+
+```{r}
+# Define the model 2 
+
+model_list[["Model 2"]]$model <- keras_model_sequential() %>%
+  layer_dense(units = 64, activation = 'relu', input_shape = ncol(x_train)) %>%
   layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 1, activation = 'tanh')
+  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dropout(rate = 0.1) %>%
+  layer_dense(units = 1) %>% 
+  # compile the model
+  compile(
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  loss = 'mse',
+  metrics = c('mae'))
+
+# Train model 1
+model_list[["Model 2"]]$fit <- model_list[["Model 2"]]$model %>% 
+  fit(x_train, y_train,
+      epochs = 50,
+      batch_size = 32,
+      validation_split = 0.2)
 ```
-  
-```{r compile the models}
-model_list[["Model 1"]]$model_compiled <-  model_list[["Model 1"]]$model %>%
-  compile(loss = "mean_squared_error",
-    optimizer = 'adam',
-    metrics = c("accuracy"))
-```
 
-
-```{r train the models}
-
-model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
-  fit(
-  X_train, Y_train,
-  epochs = 10,  # You can adjust the number of epochs
-  batch_size = 128,  # You can adjust the batch size
-  validation_data = list(X_test, Y_test),
-  verbose = 2
-)
-
-```
 
 ```{r evaluation}
+# Evaluate the model
 evaluate_df <- function(model){
-  evaluate(model, X_test, Y_test, verbose = 0) %>%
+  evaluate(model, x_test, y_test, verbose = 0) %>%
     bind_rows()
 }
 
@@ -370,8 +341,7 @@ evaluate_df <- function(model){
 model_df <- data_frame(
   name = fct_inorder(names(model_list)),
   model = map(model_list, "model"),
-  fit = map(model_list, "fit")
-) %>%
+  fit = map(model_list,"fit")) %>%
   mutate(eval = map(model, evaluate_df)) %>%
   unnest(eval)
 
@@ -386,13 +356,12 @@ model_df %>%
 
 # Loss and accuracy summary
 model_df %>%
-  select(name, loss, accuracy) %>%
-  knitr::kable(caption = "Loss and Accuracy for 2 models")
+  select(name, loss, mae)
 
 # Compare loss and accuracy between models 
 model_df %>%
-  select(name, loss, accuracy) %>%
-  gather(var,val, -name) %>%
+  select(name, loss, mae) %>%
+  gather(var,val, - name) %>%
   ggplot(aes(x = name, y = val)) +
   geom_col(colour = "blue", fill = "blue", alpha = 0.2, width = 0) +
   geom_point(colour = "blue") +
@@ -402,6 +371,12 @@ model_df %>%
 ```
 
 
+```{r}
+# Make predictions
+M1_p <- model_list[["Model 1"]]$fit %>% predict(x_test)
+M2_p <- model_list[["Model 2"]]$fit %>% predict(x_test)
+
+```
 
 
 
