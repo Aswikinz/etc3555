@@ -140,23 +140,6 @@ head(filtered_wiki_df_with_dates_country_device)
 
 ```
 
-```{r}
-
-Avg_Web_Traffic <- filtered_wiki_df_with_dates_country_device %>%
-  filter(Page == "Michael_J._Fox_en.wikipedia.org_all-access_all-agents") %>%
-  pivot_longer(cols = -c(Page, name, language, device), names_to = 'Date', values_to = 'Web_Traffic') %>%
-  mutate(Date = as.Date(Date, format = '%Y-%m-%d')) %>%
-  group_by(Date) %>%
-  summarise(Avg_Web_Traffic = mean(Web_Traffic))
-
-head(Avg_Web_Traffic)
-nrow(Avg_Web_Traffic)
-
-Avg_Web_Traffic %>%
-  ggplot() +
-  geom_line(aes(x = Date, y = Avg_Web_Traffic))
-
-```
 
 ```{r}
 # Melting the data to have it in a long format suitable for time series analysis
@@ -167,216 +150,63 @@ data_long <- wiki_df_with_dates_country_device %>%
   
 ```
 
+```{r Base Model, Random Walk}
 
-```{r}
-ets_comps <- read_csv("data_with_ETS_components.csv")
-data_long_unique <- data_long %>% distinct(Page, .keep_all = T) %>% select(-date,-page_visits)
+# Preparing data to build base model
+base_data <- data_long %>%
+  #mutate(Year = as.numeric(format(date,'%Y')), Month = as.numeric(format(date,'%m '))) %>%
+  arrange(date) %>%
+  arrange(name)
 
-ets_comp_joined_df <- data_long %>%
-  distinct(Page, .keep_all = TRUE) %>%
-  select(-date, -page_visits) %>%
-  left_join(ets_comps, by = "Page") %>%
-  mutate(ETS_content = str_extract(`ETS(clicks)`, "(?<=ETS\\()[A-Z,]+(?=\\))")) %>%
-  separate(ETS_content, into = c("error", "trend", "seasonality"), sep = ",") %>%
-  select(-`ETS(clicks)`)
-head(ets_comp_joined_df)
-dim(ets_comp_joined_df)
-```
+# Select out the name variable
+name_order <- filtered_wiki_df_with_dates_country_device %>%
+  arrange(name) %>%
+  select(name)
 
+# Transform the character variables into factors 
+base_data$language <- as.factor(base_data$language)
+base_data$device <- as.factor(base_data$device)
 
-
-
-
-```{r average ETS and ARIMA}
-
-# Example data: replace this part with your actual data loading
-# mydata <- data.frame(date=..., value=...)
-
-# Convert the data frame into a tsibble object
-Avg_Web_Traffic_tsibble <- Avg_Web_Traffic %>%
-  as_tsibble(index = Date)
-
-# Perform train-test split: 70% train, 30% test
-split_index <- floor(0.70 * nrow(Avg_Web_Traffic_tsibble))
-train_data <- Avg_Web_Traffic_tsibble[1:split_index,]
-test_data <- Avg_Web_Traffic_tsibble[(split_index+1):nrow(Avg_Web_Traffic_tsibble),]
-
-# Fit ARIMA and ETS models
-fit_arima <- train_data %>%
-  model(ARIMA(Avg_Web_Traffic))
-  
-fit_ets <- train_data %>%
-  model(ETS(Avg_Web_Traffic))
-
-# Forecast
-h <- nrow(test_data)  # forecast horizon is the size of the test set
-
-forecast_arima <- fit_arima %>% 
-  forecast(h = h)
-  
-forecast_ets <- fit_ets %>% 
-  forecast(h = h)
-
-# Calculate RMSE and other accuracy measures
-accuracy_arima <- accuracy(forecast_arima, test_data)
-accuracy_ets <- accuracy(forecast_ets, test_data)
-
-# Check and compare accuracy measures
-accuracy_arima
-accuracy_ets
-
-```
-
-
-```{r}
-# Data Visualization purpose
-Avg_Web_Traffic_with_yearmonth <- Avg_Web_Traffic%>%
-  mutate(Year = as.numeric(format(Date,'%Y')),
-         Month = as.numeric(format(Date,'%m ')))
-
-Avg_Web_Traffic_with_yearmonth %>%
-  ggplot(aes(x = Month, y = Avg_Web_Traffic)) +
-  geom_bar(stat = "identity") + 
-  facet_wrap(~ Year, nrow = 1)
-
-```
-
-```{r}
-data <- filtered_wiki_df_with_dates_country_device
-
-# Convert string variables to factors
-data <- data %>%
-  select(-c("Page", "name"))
-data$language <- as.factor(data$language)
-data$device <- as.factor(data$device)
+head(base_data)
 
 # Encode categorical variables
-dmy <- dummyVars(" ~ .", data = data[,1:2])
-encoded_data <- data.frame(predict(dmy, newdata = data[,1:2]))
+dmy <- dummyVars(" ~ .", data = base_data[,3:4])
+encoded_data <- data.frame(predict(dmy, newdata = base_data[,3:4]))
+remaining_col <- base_data %>%
+  select(- c("Page", "name","language","device"))
 
-# Extract and normalize time series data
-time_series_data <- data[, 3:ncol(data)]
-normalized_time_series <- scale(time_series_data)
+base_data <- cbind(encoded_data, remaining_col)
 
-# Combine encoded and normalized data
-final_data <- cbind(encoded_data, normalized_time_series)
-dim(final_data)
+# Split training and testing dataset
+base_train <- base_data %>%
+  filter(date != "2020-01-16")
+base_test <- base_data %>%
+  filter(date == "2020-01-16")
 
+xgb_model <- xgboost(data = model.matrix(~. - page_visits, data = base_train)[, -12],
+                   label = base_train$page_visits,
+                   max.depth = 50,
+                   eta = 0.05,
+                   nrounds = 100,
+                   verbose = 2)
 
-# Split the data into training and testing sets
-set.seed(123) 
-sample_index <- sample(seq_len(nrow(final_data)), size = floor(0.8 * nrow(final_data)))
+# Predict the model
+xgb_pred <- predict(xgb_model, model.matrix(~. - page_visits, data = base_test)[, -12])
 
-x_train <- as.matrix(final_data[sample_index, -ncol(final_data)])
-y_train <- as.matrix(final_data[sample_index, ncol(final_data)])
+# View the results
+xgb_results <- data.frame(Page = name_order,
+                          Actual = base_test$page_visits, 
+                          Prediction = xgb_pred)
+head(xgb_results)
 
-x_test <- as.matrix(final_data[-sample_index, -ncol(final_data)])
-y_test <- as.matrix(final_data[-sample_index, ncol(final_data)])
-
-dim(x_train)
-dim(y_train)
-dim(x_test)
-dim(y_test)
-
-```
-
-```{r}
-# Intialise the list for comparision between 2 models
-model_list <- list()
-
-# Define the model 1 
-
-model_list[["Model 1"]]$model <- keras_model_sequential() %>%
-  layer_dense(units = 64, activation = 'relu', input_shape = ncol(x_train)) %>%
-  layer_dense(units = 32, activation = 'relu') %>%
-  layer_dense(units = 1) %>% 
-  # compile the model
-  compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
-  loss = 'mse',
-  metrics = c('mae'))
-
-# Train model 1
-model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>% 
-  fit(x_train, y_train,
-      epochs = 50,
-      batch_size = 32,
-      validation_split = 0.2)
+# View the Results of the base model 
+data.frame(RMSE = rmse(xgb_results$Prediction, base_test$page_visits),
+           MSE = mse(xgb_results$Prediction, base_test$page_visits),
+           MAE = mae(xgb_results$Prediction, base_test$page_visits),
+           MAPE = mape(xgb_results$Prediction, base_test$page_visits))
 
 ```
 
-
-```{r}
-# Define the model 2 
-
-model_list[["Model 2"]]$model <- keras_model_sequential() %>%
-  layer_dense(units = 64, activation = 'relu', input_shape = ncol(x_train)) %>%
-  layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 32, activation = 'relu') %>%
-  layer_dropout(rate = 0.1) %>%
-  layer_dense(units = 1) %>% 
-  # compile the model
-  compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
-  loss = 'mse',
-  metrics = c('mae'))
-
-# Train model 1
-model_list[["Model 2"]]$fit <- model_list[["Model 2"]]$model %>% 
-  fit(x_train, y_train,
-      epochs = 50,
-      batch_size = 32,
-      validation_split = 0.2)
-```
-
-
-```{r evaluation}
-# Evaluate the model
-evaluate_df <- function(model){
-  evaluate(model, x_test, y_test, verbose = 0) %>%
-    bind_rows()
-}
-
-# Convert list to data frame 
-model_df <- data_frame(
-  name = fct_inorder(names(model_list)),
-  model = map(model_list, "model"),
-  fit = map(model_list,"fit")) %>%
-  mutate(eval = map(model, evaluate_df)) %>%
-  unnest(eval)
-
-# Loss and accuracy plot
-model_df %>%
-  mutate(metrics = map(fit, function(x){data.frame(x)})) %>%
-  select(name, metrics) %>%
-  unnest(metrics) %>%
-  ggplot(aes(x = epoch, y = value, colour = data)) +
-  geom_line() +
-  facet_grid(metric~name, scales = "free_y")
-
-# Loss and accuracy summary
-model_df %>%
-  select(name, loss, mae)
-
-# Compare loss and accuracy between models 
-model_df %>%
-  select(name, loss, mae) %>%
-  gather(var,val, - name) %>%
-  ggplot(aes(x = name, y = val)) +
-  geom_col(colour = "blue", fill = "blue", alpha = 0.2, width = 0) +
-  geom_point(colour = "blue") +
-  facet_wrap(~var, scales = "free_x") +
-  coord_flip()
-
-```
-
-
-```{r}
-# Make predictions
-M1_p <- model_list[["Model 1"]]$fit %>% predict(x_test)
-M2_p <- model_list[["Model 2"]]$fit %>% predict(x_test)
-
-```
 
 
 
