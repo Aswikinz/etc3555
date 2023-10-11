@@ -108,10 +108,6 @@ merged_df <- merged_df %>%
 
 ```
 
-
-
-
-
 ```{r}
 data <- merged_df %>% select(-name,-ncol(merged_df))
 head(data)
@@ -152,120 +148,9 @@ x_test <- as.matrix(final_data[-sample_index, -ncol(final_data)])
 y_test <- final_data[-sample_index, ncol(final_data)]
 ```
 
-```{r}
-model <- keras_model_sequential() %>%
-  layer_dense(units = 128, activation = 'relu', input_shape = ncol(x_train)) %>%
-  layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 64, activation = 'relu') %>%
-  layer_dropout(rate = 0.3) %>%
-  layer_dense(units = 32, activation = 'relu') %>%
-  layer_dense(units = 1, kernel_regularizer = regularizer_l2(l = 0.01))  # Added L2 regularization
-
-model %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),  # Updated here
-  loss = 'mse',
-  metrics = c('mae')
-)
-
-# Implement early stopping
-early_stop <- callback_early_stopping(monitor = "val_loss", patience = 35)
-
-# Implement ReduceLROnPlateau
-reduce_lr <- callback_reduce_lr_on_plateau(monitor = "val_loss", factor = 0.2,
-                                           patience = 5, min_lr = 0.0001)
-
-# Train the model
-history <- model %>% fit(
-  x_train, y_train,
-  epochs = 200,
-  batch_size = 128,
-  validation_split = 0.2,
-  callbacks = list(early_stop, reduce_lr)  # Added reduce_lr callback
-)
-
-# Evaluate the model
-model %>% evaluate(x_test, y_test)
-
-# Make predictions
-predictions <- model %>% predict(x_test)
-```
-
 
 
 ```{r}
-
-
-dim(x_train)
-head(y_train)
-dim(x_test)
-dim(y_test)
-```
-
-
-
-```{r}
-library(ggplot2)
-
-# Extract training history
-history_data <- as.data.frame(history$metrics)
-
-# Generate epoch vector
-epochs <- seq(1, nrow(history_data))
-
-# Plotting Loss
-p1 <- ggplot(history_data, aes(x = epochs)) +
-  geom_line(aes(y = loss, col = "Training")) +
-  geom_line(aes(y = val_loss, col = "Validation")) +
-  labs(title = "Model Loss", x = "Epochs", y = "Loss") +
-  scale_color_manual(values = c("blue", "red")) +
-  theme_minimal()
-
-# Plotting Mean Absolute Error (if available)
-p2 <- NULL
-if ("mae" %in% names(history_data)) {
-  p2 <- ggplot(history_data, aes(x = epochs)) +
-    geom_line(aes(y = mae, col = "Training")) +
-    geom_line(aes(y = val_mae, col = "Validation")) +
-    labs(title = "Mean Absolute Error", x = "Epochs", y = "MAE") +
-    scale_color_manual(values = c("blue", "red")) +
-    theme_minimal()
-}
-
-p1
-p2
-
-```
-```{r}
-# Assuming `predictions` are your model's predictions and `y_test` are the actual values
-
-# Ensure predictions are the same length as y_test
-if(length(predictions) != length(y_test)) {
-  stop("Predictions and actual values have different lengths!")
-}
-
-# Compute Metrics
-mae <- mean(abs(predictions - y_test))  # Mean Absolute Error
-mse <- mean((predictions - y_test)^2)    # Mean Squared Error
-rmse <- sqrt(mse)                        # Root Mean Squared Error
-
-# Print Metrics
-cat("Mean Absolute Error: ", mae, "\n")
-cat("Mean Squared Error: ", mse, "\n")
-cat("Root Mean Squared Error: ", rmse, "\n")
-
-```
-
-```{r}
-
-cat("Denormalised Mean Absolute Error: ", (mae * sd(y_train)) + mean(y_train), "\n")
-cat("Denormalised Mean Squared Error: ", (mse * sd(y_train)) + mean(y_train), "\n")
-cat("Denormalised Root Mean Squared Error: ", (rmse * sd(y_train)) + mean(y_train), "\n")
-```
-
-```{r}
-
-
-
 create_sequences <- function(data, n_steps) {
   x <- NULL
   y <- NULL
@@ -296,36 +181,39 @@ y_test <- sequences$y[(train_size + 1):length(sequences$y)]
 ```
 
 ```{r}
+# Intialise the list for comparision between 2 models
+model_list <- list()
+
 # Define LSTM model
-model <- keras_model_sequential() %>%
+model_list[["Model 1"]]$model <- keras_model_sequential() %>%
   layer_lstm(units = 50, input_shape = c(10, 886), return_sequences = TRUE) %>%
   layer_lstm(units = 50, return_sequences = TRUE) %>%
   layer_lstm(units = 50) %>%
   layer_dense(units = 1)
 
 # Compile the model
-model %>% compile(
+model_list[["Model 1"]]$model %>% compile(
   optimizer = optimizer_adam(learning_rate = 0.001),
   loss = "mse"
 )
 
 # Train the model
-history <- model %>% fit(
-  x_train, y_train,
-  epochs = 100,
-  batch_size = 32,
-  validation_data = list(x_test, y_test)
+model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
+  fit(
+    x_train, y_train,
+    epochs = 100,
+    batch_size = 32,
+    validation_data = list(x_test, y_test)
 )
 
-```
-```{r}
 # Evaluate the model
 model %>% evaluate(x_test, y_test)
 
 # Make predictions
 predictions <- model %>% predict(x_test)
-
 ```
+
+
 
 ```{r}
 # Extract training history
@@ -344,8 +232,9 @@ p1 <- ggplot(history_data, aes(x = epochs)) +
 
 
 p1
-
 ```
+
+
 ```{r}
 # Ensure predictions are the same length as y_test
 if(length(predictions) != length(y_test)) {
@@ -369,30 +258,9 @@ cat("Denormalised Mean Squared Error: ", (mse * sd(y_train)) + mean(y_train), "\
 cat("Denormalised Root Mean Squared Error: ", (rmse * sd(y_train)) + mean(y_train), "\n")
 ```
 
-```{r}
-# Define LSTM model
-model2 <- keras_model_sequential() %>%
-  layer_gru(units = 50, input_shape = c(10, 886), return_sequences = TRUE) %>%
-  layer_dense(units = 1)
-
-# Compile the model
-model2 %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
-  loss = "mse"
-)
-
-# Train the model
-history2 <- model %>% fit(
-  x_train, y_train,
-  epochs = 100,
-  batch_size = 32,
-  validation_data = list(x_test, y_test)
-)
-
-```
 
 ```{r}
-model3 <- keras_model_sequential() %>%
+model_list[["Model 2"]]$model <- keras_model_sequential() %>%
   layer_gru(units = 32, 
             dropout = 0.1, 
             recurrent_dropout = 0.5,
@@ -404,13 +272,13 @@ model3 <- keras_model_sequential() %>%
   layer_dense(units = 1)
 
 # Compile the model
-model3 %>% compile(
+model_list[["Model 2"]]$model %>% compile(
   optimizer = optimizer_rmsprop(),
   loss = "mse"
 )
 
 # Train the model
-history3 <- model %>% fit(
+model_list[["Model 2"]]$fit <- model_list[["Model 2"]]$model %>% fit(
   x_train, y_train,
   epochs = 100,
   batch_size = 32,
@@ -418,33 +286,11 @@ history3 <- model %>% fit(
 )
 ```
 
-```{r}
-# Evaluate the model
-model2 %>% evaluate(x_test, y_test)
 
+```{r}
 # Make predictions
-predictions2 <- model2 %>% predict(x_test)
-```
-
-```{r}
-# Compute Metrics
-mae2 <- mean(abs(predictions2 - y_test))  # Mean Absolute Error
-mse2 <- mean((predictions2 - y_test)^2)    # Mean Squared Error
-rmse2 <- sqrt(mse2)                        # Root Mean Squared Error
-
-# Print Metrics
-cat("Mean Absolute Error: ", mae2, "\n")
-cat("Mean Squared Error: ", mse2, "\n")
-cat("Root Mean Squared Error: ", rmse2, "\n")
-```
-
-
-```{r}
-# Evaluate the model
-model3 %>% evaluate(x_test, y_test)
-
-# Make predictions
-predictions3 <- model3 %>% predict(x_test)
+pred_1 <- model_list[["Model 1"]]$model %>% predict(x_test)
+pred_2 <- model_list[["Model 2"]]$model %>% predict(x_test)
 ```
 
 ```{r}
@@ -458,3 +304,47 @@ cat("Mean Absolute Error: ", mae3, "\n")
 cat("Mean Squared Error: ", mse3, "\n")
 cat("Root Mean Squared Error: ", rmse3, "\n")
 ```
+
+```{r}
+# Evaluate the model
+evaluate_df <- function(model){
+  evaluate(model, x_test, y_test, verbose = 0) %>%
+    bind_rows()
+}
+
+# Convert list to data frame 
+model_df <- data_frame(
+  name = fct_inorder(names(model_list)),
+  model = map(model_list, "model"),
+  fit = map(model_list,"fit")) %>%
+  mutate(eval = map(model, evaluate_df)) %>%
+  unnest(eval)
+
+# Loss and accuracy plot
+model_df %>%
+  mutate(metrics = map(fit, function(x){data.frame(x)})) %>%
+  select(name, metrics) %>%
+  unnest(metrics) %>%
+  ggplot(aes(x = epoch, y = value, colour = data)) +
+  geom_line() +
+  facet_grid(metric~name, scales = "free_y")
+
+# Loss and accuracy summary
+model_df %>%
+  select(name, loss, mae)
+
+# Compare loss and accuracy between models 
+model_df %>%
+  select(name, loss, mae) %>%
+  gather(var,val, - name) %>%
+  ggplot(aes(x = name, y = val)) +
+  geom_col(colour = "blue", fill = "blue", alpha = 0.2, width = 0) +
+  geom_point(colour = "blue") +
+  facet_wrap(~var, scales = "free_x") +
+  coord_flip()
+
+
+```
+
+
+
