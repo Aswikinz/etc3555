@@ -7,22 +7,116 @@ date: "2023-10-07"
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(keras)
-```
-
-```{r}
-data <- read_csv("for_nt.csv") %>% select(-name)
-head(data)
-write_csv(data,"data.csv")
-
-
-```
-
-```{r}
-library(keras)
 library(caret)
+```
 
 
-# Convert string variables to factors
+
+
+Dont run this chunk 
+
+```{r ets using df_long , eval = FALSE}
+#u dont have to run this chunk, its already been processed and saved, skip to the next 
+plan(multisession)
+# Ensure 'models/' and 'forecasts/' directories exist
+dir.create("models", showWarnings = FALSE)
+dir.create("forecasts", showWarnings = FALSE)
+df_long_filter <- df_long %>%
+  select(Page, date, clicks) %>%
+  mutate(date = as.Date(date, format="%Y-%m-%d"))
+# Convert the data into a tsibble object (time series tibble)
+data_tsibble <- df_long_filter %>% 
+  as_tsibble(index = date, key = Page)
+pages <- unique(df_long$Page)
+page_filenames <- make.names(pages, unique = TRUE)
+# Fit models in parallel and save them to RDS files
+future_map2(pages, page_filenames, function(page, filename) {
+  # Filter data for the specific page
+  page_data <- data_tsibble %>% filter(Page == page)
+  
+  # Fit the ETS model
+  model <- page_data %>%
+    model(ETS(clicks))
+  
+  # Save the model to an RDS file, named by page
+  saveRDS(model, paste0("models/", filename, ".rds"))
+})
+# Generate forecasts in parallel and save them
+future_map(page_filenames, function(filename) {
+  # Load the model from the RDS file
+  model <- readRDS(paste0("models/", filename, ".rds"))
+  
+  # Generate forecasts
+  forecasts <- model %>% forecast(h = "30 days")
+  
+  # Save the forecasts to an RDS file
+  saveRDS(forecasts, paste0("forecasts/", filename, ".rds"))
+})
+# When needed, load forecasts and combine them for plotting/analysis
+forecasts_list <- future_map(page_filenames, ~readRDS(paste0("forecasts/", .x, ".rds")))
+forecasts_combined <- bind_rows(forecasts_list)
+```
+
+dont run this 
+
+```{r load the dataframe back from the files}
+
+model_files <- list.files(path = "models/", pattern = "*.rds", full.names = TRUE)
+# Read and bind data
+model_list <- lapply(model_files, readRDS)
+model_ets_df <- bind_rows(model_list)
+```
+
+
+run from here on
+```{r}
+
+
+
+# Load the datasets
+ets_model <- read_csv("ets_model.csv")
+country_device_df <- read_csv("country_device_df.csv")
+
+# Cleaning: Remove duplicate names from country_device_df
+country_device_df_clean <- country_device_df %>%
+    distinct(name, .keep_all = TRUE)
+
+# Extract error, trend, and seasonality from ets(clicks) in ets_model
+# Ensure the column name containing "<ETS(...)>" is accurate.
+ets_model_clean <- ets_model %>%
+    mutate(
+        ETS = str_extract(`ETS(clicks)`, "(?<=<ETS\\().*?(?=\\)>)"),
+        error = sapply(strsplit(ETS, ","), "[[", 1),
+        trend = sapply(strsplit(ETS, ","), "[[", 2),
+        seasonality = sapply(strsplit(ETS, ","), "[[", 3)
+    ) %>%
+    select(-ETS, -`ETS(clicks)`) # Omit unnecessary columns
+
+# Joining: Merge country_device_df_clean with ets_model_clean
+# Ensure that the joining column "name" is correctly identified and prepared in both dataframes.
+merged_df <- merge(country_device_df_clean, ets_model_clean, by = "Page", all.x = TRUE)
+
+merged_df <- merged_df %>%
+    select(name, language, device, error, trend, seasonality,everything()) %>% select(-Page)
+
+merged_df <- merged_df %>%
+    mutate(
+        error = ifelse(is.na(error), "notavailable", error),
+        trend = ifelse(is.na(trend), "notavailable", trend),
+        seasonality = ifelse(is.na(seasonality), "notavailable", seasonality)
+    )
+
+```
+
+
+
+
+
+```{r}
+data <- merged_df %>% select(-name,-ncol(merged_df))
+head(data)
+```
+```{r}
 data$language <- as.factor(data$language)
 data$device <- as.factor(data$device)
 data$error <- as.factor(data$error)
@@ -40,36 +134,53 @@ normalized_time_series <- scale(time_series_data)
 # Combine encoded and normalized data
 final_data <- cbind(encoded_data, normalized_time_series)
 
-# Split the data into training and testing sets
+```
+
+
+```{r}
+# Assuming that your target variable is the last column
+# and other columns are features
+
+# Split the data
 set.seed(123) 
 sample_index <- sample(seq_len(nrow(final_data)), size = floor(0.8 * nrow(final_data)))
 
 x_train <- as.matrix(final_data[sample_index, -ncol(final_data)])
-y_train <- as.matrix(final_data[sample_index, ncol(final_data)])
+y_train <- final_data[sample_index, ncol(final_data)]
 
 x_test <- as.matrix(final_data[-sample_index, -ncol(final_data)])
-y_test <- as.matrix(final_data[-sample_index, ncol(final_data)])
+y_test <- final_data[-sample_index, ncol(final_data)]
+```
 
-# Define the model
+```{r}
 model <- keras_model_sequential() %>%
-  layer_dense(units = 64, activation = 'relu', input_shape = ncol(x_train)) %>%
+  layer_dense(units = 128, activation = 'relu', input_shape = ncol(x_train)) %>%
+  layer_dropout(rate = 0.3) %>%
   layer_dense(units = 64, activation = 'relu') %>%
-  layer_dense(units = 1)
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 32, activation = 'relu') %>%
+  layer_dense(units = 1, kernel_regularizer = regularizer_l2(l = 0.01))  # Added L2 regularization
 
-# Compile the model
 model %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
+  optimizer = optimizer_adam(learning_rate = 0.001),  # Updated here
   loss = 'mse',
   metrics = c('mae')
 )
 
+# Implement early stopping
+early_stop <- callback_early_stopping(monitor = "val_loss", patience = 35)
+
+# Implement ReduceLROnPlateau
+reduce_lr <- callback_reduce_lr_on_plateau(monitor = "val_loss", factor = 0.2,
+                                           patience = 5, min_lr = 0.0001)
 
 # Train the model
 history <- model %>% fit(
   x_train, y_train,
-  epochs = 100,
-  batch_size = 32,
-  validation_split = 0.2
+  epochs = 200,
+  batch_size = 128,
+  validation_split = 0.2,
+  callbacks = list(early_stop, reduce_lr)  # Added reduce_lr callback
 )
 
 # Evaluate the model
@@ -77,8 +188,20 @@ model %>% evaluate(x_test, y_test)
 
 # Make predictions
 predictions <- model %>% predict(x_test)
-
 ```
+
+
+
+```{r}
+
+
+dim(x_train)
+head(y_train)
+dim(x_test)
+dim(y_test)
+```
+
+
 
 ```{r}
 library(ggplot2)
@@ -108,9 +231,8 @@ if ("mae" %in% names(history_data)) {
     theme_minimal()
 }
 
-# Display plots
 p1
-if (!is.null(p2)) p2
+p2
 
 ```
 ```{r}
@@ -135,10 +257,115 @@ cat("Root Mean Squared Error: ", rmse, "\n")
 
 ```{r}
 
+cat("Denormalised Mean Absolute Error: ", (mae * sd(y_train)) + mean(y_train), "\n")
+cat("Denormalised Mean Squared Error: ", (mse * sd(y_train)) + mean(y_train), "\n")
+cat("Denormalised Root Mean Squared Error: ", (rmse * sd(y_train)) + mean(y_train), "\n")
+```
 
-mean <- apply(x_train, 2, mean)
-std <- apply(train_data, 2, sd)
-data <- scale(data, center = mean, scale = std) 
-celsius_mae <- 0.29 * std[[2]] 
+```{r}
+
+
+
+create_sequences <- function(data, n_steps) {
+  x <- NULL
+  y <- NULL
+  
+  data_mat <- as.matrix(data)
+  
+  for(i in 1:(nrow(data) - n_steps)) {
+    x <- rbind(x, data_mat[i:(i + n_steps - 1), ])
+    y <- c(y, data_mat[i + n_steps, 1])
+  }
+  
+  list(x = array(x, dim = c((nrow(x) / n_steps), n_steps, ncol(x))),
+       y = y)
+}
+
+# Example usage:
+n_steps <- 10 
+sequences <- create_sequences(final_data, n_steps)
+
+
+
+# Split data into training and test sets
+train_size <- floor(0.8 * length(sequences$y))
+x_train <- sequences$x[1:train_size, ,]
+y_train <- sequences$y[1:train_size]
+x_test <- sequences$x[(train_size + 1):length(sequences$y), ,]
+y_test <- sequences$y[(train_size + 1):length(sequences$y)]
+```
+
+```{r}
+# Define LSTM model
+model <- keras_model_sequential() %>%
+  layer_lstm(units = 50, input_shape = c(10, 886), return_sequences = TRUE) %>%
+  layer_lstm(units = 50, return_sequences = TRUE) %>%
+  layer_lstm(units = 50) %>%
+  layer_dense(units = 1)
+
+# Compile the model
+model %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  loss = "mse"
+)
+
+# Train the model
+history <- model %>% fit(
+  x_train, y_train,
+  epochs = 100,
+  batch_size = 32,
+  validation_data = list(x_test, y_test)
+)
+
+```
+```{r}
+# Evaluate the model
+model %>% evaluate(x_test, y_test)
+
+# Make predictions
+predictions <- model %>% predict(x_test)
+
+```
+
+```{r}
+# Extract training history
+history_data <- as.data.frame(history$metrics)
+
+# Generate epoch vector
+epochs <- seq(1, nrow(history_data))
+
+# Plotting Loss
+p1 <- ggplot(history_data, aes(x = epochs)) +
+  geom_line(aes(y = loss, col = "Training")) +
+  geom_line(aes(y = val_loss, col = "Validation")) +
+  labs(title = "Model Loss", x = "Epochs", y = "Loss") +
+  scale_color_manual(values = c("blue", "red")) +
+  theme_minimal()
+
+
+p1
+
+```
+```{r}
+# Ensure predictions are the same length as y_test
+if(length(predictions) != length(y_test)) {
+  stop("Predictions and actual values have different lengths!")
+}
+
+# Compute Metrics
+mae <- mean(abs(predictions - y_test))  # Mean Absolute Error
+mse <- mean((predictions - y_test)^2)    # Mean Squared Error
+rmse <- sqrt(mse)                        # Root Mean Squared Error
+
+# Print Metrics
+cat("Mean Absolute Error: ", mae, "\n")
+cat("Mean Squared Error: ", mse, "\n")
+cat("Root Mean Squared Error: ", rmse, "\n")
+```
+
+```{r}
+cat("Denormalised Mean Absolute Error: ", (mae * sd(y_train)) + mean(y_train), "\n")
+cat("Denormalised Mean Squared Error: ", (mse * sd(y_train)) + mean(y_train), "\n")
+cat("Denormalised Root Mean Squared Error: ", (rmse * sd(y_train)) + mean(y_train), "\n")
 ```
 
