@@ -405,7 +405,7 @@ model3 <- keras_model_sequential() %>%
 
 # Compile the model
 model3 %>% compile(
-  optimizer = optimizer_adam(learning_rate = 0.001),
+  optimizer = optimizer_rmsprop(),
   loss = "mse"
 )
 
