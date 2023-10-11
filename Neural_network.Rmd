@@ -369,3 +369,92 @@ cat("Denormalised Mean Squared Error: ", (mse * sd(y_train)) + mean(y_train), "\
 cat("Denormalised Root Mean Squared Error: ", (rmse * sd(y_train)) + mean(y_train), "\n")
 ```
 
+```{r}
+# Define LSTM model
+model2 <- keras_model_sequential() %>%
+  layer_gru(units = 50, input_shape = c(10, 886), return_sequences = TRUE) %>%
+  layer_dense(units = 1)
+
+# Compile the model
+model2 %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  loss = "mse"
+)
+
+# Train the model
+history2 <- model %>% fit(
+  x_train, y_train,
+  epochs = 100,
+  batch_size = 32,
+  validation_data = list(x_test, y_test)
+)
+
+```
+
+```{r}
+model3 <- keras_model_sequential() %>%
+  layer_gru(units = 32, 
+            dropout = 0.1, 
+            recurrent_dropout = 0.5,
+            return_sequences = TRUE,
+            input_shape = c(10, 886)) %>% 
+  layer_gru(units = 64, activation = "relu",
+            dropout = 0.1,
+            recurrent_dropout = 0.5) %>% 
+  layer_dense(units = 1)
+
+# Compile the model
+model3 %>% compile(
+  optimizer = optimizer_adam(learning_rate = 0.001),
+  loss = "mse"
+)
+
+# Train the model
+history3 <- model %>% fit(
+  x_train, y_train,
+  epochs = 100,
+  batch_size = 32,
+  validation_data = list(x_test, y_test)
+)
+```
+
+```{r}
+# Evaluate the model
+model2 %>% evaluate(x_test, y_test)
+
+# Make predictions
+predictions2 <- model2 %>% predict(x_test)
+```
+
+```{r}
+# Compute Metrics
+mae2 <- mean(abs(predictions2 - y_test))  # Mean Absolute Error
+mse2 <- mean((predictions2 - y_test)^2)    # Mean Squared Error
+rmse2 <- sqrt(mse2)                        # Root Mean Squared Error
+
+# Print Metrics
+cat("Mean Absolute Error: ", mae2, "\n")
+cat("Mean Squared Error: ", mse2, "\n")
+cat("Root Mean Squared Error: ", rmse2, "\n")
+```
+
+
+```{r}
+# Evaluate the model
+model3 %>% evaluate(x_test, y_test)
+
+# Make predictions
+predictions3 <- model3 %>% predict(x_test)
+```
+
+```{r}
+# Compute Metrics
+mae3 <- mean(abs(predictions3 - y_test))  # Mean Absolute Error
+mse3 <- mean((predictions3 - y_test)^2)    # Mean Squared Error
+rmse3 <- sqrt(mse3)                        # Root Mean Squared Error
+
+# Print Metrics
+cat("Mean Absolute Error: ", mae3, "\n")
+cat("Mean Squared Error: ", mse3, "\n")
+cat("Root Mean Squared Error: ", rmse3, "\n")
+```
