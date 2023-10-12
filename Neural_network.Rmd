@@ -125,29 +125,12 @@ encoded_data <- data.frame(predict(dmy, newdata = data[,1:5]))
 
 # Extract and normalize time series data
 time_series_data <- data[, 6:ncol(data)]
-normalized_time_series <- scale(time_series_data)
+# normalized_time_series <- scale(time_series_data)
 
-# Combine encoded and normalized data
-final_data <- cbind(encoded_data, normalized_time_series)
+# Combine encoded and data
+final_data <- cbind(encoded_data, time_series_data)
 
 ```
-
-
-```{r}
-# Assuming that your target variable is the last column
-# and other columns are features
-
-# Split the data
-set.seed(123) 
-sample_index <- sample(seq_len(nrow(final_data)), size = floor(0.8 * nrow(final_data)))
-
-x_train <- as.matrix(final_data[sample_index, -ncol(final_data)])
-y_train <- final_data[sample_index, ncol(final_data)]
-
-x_test <- as.matrix(final_data[-sample_index, -ncol(final_data)])
-y_test <- final_data[-sample_index, ncol(final_data)]
-```
-
 
 
 ```{r}
@@ -178,7 +161,17 @@ x_train <- sequences$x[1:train_size, ,]
 y_train <- sequences$y[1:train_size]
 x_test <- sequences$x[(train_size + 1):length(sequences$y), ,]
 y_test <- sequences$y[(train_size + 1):length(sequences$y)]
+
+y_train_sd <- sd(y_train)
+y_train_mean <- mean(y_train)
+
 ```
+
+```{r}
+x_train_norm <- scale(x_train)
+x_test_norm <- scale(x_test)
+```
+
 
 ```{r}
 # Intialise the list for comparision between 2 models
@@ -200,17 +193,17 @@ model_list[["Model 1"]]$model %>% compile(
 # Train the model
 model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
   fit(
-    x_train, y_train,
+    x_train_norm, y_train,
     epochs = 100,
     batch_size = 32,
-    validation_data = list(x_test, y_test)
+    validation_data = list(x_test_norm, y_test)
 )
 
 # Evaluate the model
-model %>% evaluate(x_test, y_test)
+model %>% evaluate(x_test_norm, y_test)
 
 # Make predictions
-predictions <- model %>% predict(x_test)
+predictions <- model %>% predict(x_test_norm)
 ```
 
 
@@ -253,9 +246,9 @@ cat("Root Mean Squared Error: ", rmse, "\n")
 ```
 
 ```{r}
-cat("Denormalised Mean Absolute Error: ", (mae * sd(y_train)) + mean(y_train), "\n")
-cat("Denormalised Mean Squared Error: ", (mse * sd(y_train)) + mean(y_train), "\n")
-cat("Denormalised Root Mean Squared Error: ", (rmse * sd(y_train)) + mean(y_train), "\n")
+cat("Denormalised Mean Absolute Error: ", (mae * y_train_sd) + y_train_mean, "\n")
+cat("Denormalised Mean Squared Error: ", (mse * y_train_sd) + y_train_mean, "\n")
+cat("Denormalised Root Mean Squared Error: ", (rmse * y_train_sd) + y_train_mean, "\n")
 ```
 
 
@@ -279,18 +272,18 @@ model_list[["Model 2"]]$model %>% compile(
 
 # Train the model
 model_list[["Model 2"]]$fit <- model_list[["Model 2"]]$model %>% fit(
-  x_train, y_train,
+  x_train_norm, y_train,
   epochs = 100,
   batch_size = 32,
-  validation_data = list(x_test, y_test)
+  validation_data = list(x_test_norm, y_test)
 )
 ```
 
 
 ```{r}
 # Make predictions
-pred_1 <- model_list[["Model 1"]]$model %>% predict(x_test)
-pred_2 <- model_list[["Model 2"]]$model %>% predict(x_test)
+pred_1 <- model_list[["Model 1"]]$model %>% predict(x_test_norm)
+pred_2 <- model_list[["Model 2"]]$model %>% predict(x_test_norm)
 ```
 
 ```{r}
@@ -308,7 +301,7 @@ cat("Root Mean Squared Error: ", rmse3, "\n")
 ```{r}
 # Evaluate the model
 evaluate_df <- function(model){
-  evaluate(model, x_test, y_test, verbose = 0) %>%
+  evaluate(model, x_test_norm, y_test, verbose = 0) %>%
     bind_rows()
 }
 
@@ -345,6 +338,7 @@ model_df %>%
 
 
 ```
+
 
 
 
