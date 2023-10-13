@@ -70,9 +70,6 @@ model_ets_df <- bind_rows(model_list)
 
 run from here on
 ```{r}
-
-
-
 # Load the datasets
 ets_model <- read_csv("ets_model.csv")
 country_device_df <- read_csv("country_device_df.csv")
@@ -200,10 +197,10 @@ model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
 )
 
 # Evaluate the model
-model %>% evaluate(x_test_norm, y_test)
+model_list[["Model 1"]]$model %>% evaluate(x_test_norm, y_test)
 
 # Make predictions
-predictions <- model %>% predict(x_test_norm)
+predictions <- model_list[["Model 1"]]$model %>% predict(x_test_norm)
 ```
 
 
