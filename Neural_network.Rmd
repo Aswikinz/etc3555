@@ -70,9 +70,6 @@ model_ets_df <- bind_rows(model_list)
 
 run from here on
 ```{r}
-
-
-
 # Load the datasets
 ets_model <- read_csv("ets_model.csv")
 country_device_df <- read_csv("country_device_df.csv")
@@ -111,6 +108,7 @@ merged_df <- merged_df %>%
 ```{r}
 data <- merged_df %>% select(-name,-ncol(merged_df))
 head(data)
+
 ```
 ```{r}
 data$language <- as.factor(data$language)
@@ -129,8 +127,74 @@ time_series_data <- data[, 6:ncol(data)]
 
 # Combine encoded and data
 final_data <- cbind(encoded_data, time_series_data)
+head(final_data)
+
+index_page <- 1:nrow(final_data) # To define which prediction is for which page
+
+final_data_long <- final_data %>%
+  mutate(index = index_page) %>%
+  pivot_longer(cols = starts_with("2017")|starts_with("2018")|starts_with("2019")|starts_with("2020"),
+               names_to = "date", values_to = "page_visits") %>%
+  mutate(date = as.Date(date))
+
+head(final_data_long)
+dim(final_data_long)
 
 ```
+
+```{r}
+# Split train and test
+cutoff_date <- as.Date("2019-12-17")
+
+train_data <- subset(final_data_long,date <= cutoff_date)
+test_data <- subset(final_data_long,date > cutoff_date)
+
+head(final_data_long)
+head(train_data)
+tail(train_data)
+
+# Normalise the page_visit columns
+train_mean <- mean(train_data$page_visits)
+train_sd <- sd(train_data$page_visits)
+test_mean <- mean(test_data$page_visits)
+test_sd <- sd(test_data$page_visits)
+
+train_data <- train_data %>%
+  mutate(page_visits = (page_visits - train_mean) / train_sd) %>%
+  select(-index)
+
+index_test <- test_data %>% select(index)
+
+test_data <- test_data %>%
+  mutate(page_visits = (page_visits - test_mean) / test_sd) %>%
+  select(-index)
+
+# Denormalise
+#denormalized_data <- (normalized_data * sd_value) + mean_value
+
+# Create sequences
+sequence_length <- 7 
+
+x_train <- list()
+x_test <- list()
+y_train <- list()
+y_test <- list()
+
+for (i in 1:(nrow(train_data) - sequence_length)) {
+  x_train[[i]] <- as.matrix(train_data[i:(i + sequence_length - 1),-1])
+  y_train[[i]] <- train_data[i + sequence_length, "page_visits"]
+  x_test [[i]] <- as.matrix(train_data[i:(i + sequence_length - 1),-1])
+  y_test[[i]] <- train_data[i + sequence_length, "page_visits"]
+}
+
+# Convert into matrix 
+x_train <- array(unlist(x_train), dim = c(length(x_train), sequence_length, ))
+y_train <- as.array(y_train)
+y_test <- as.array(y_test)
+
+```
+
+
 
 
 ```{r}
@@ -153,8 +217,6 @@ create_sequences <- function(data, n_steps) {
 n_steps <- 10 
 sequences <- create_sequences(final_data, n_steps)
 
-
-
 # Split data into training and test sets
 train_size <- floor(0.8 * length(sequences$y))
 x_train <- sequences$x[1:train_size, ,]
@@ -170,6 +232,8 @@ y_train_mean <- mean(y_train)
 ```{r}
 x_train_norm <- scale(x_train)
 x_test_norm <- scale(x_test)
+dim(x_train_norm)
+dim(x_test_norm)
 ```
 
 
