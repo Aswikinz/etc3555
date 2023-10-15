@@ -199,8 +199,9 @@ dim(y_test)
 model_list <- list()
 
 model_list[["Model 1"]]$model <- keras_model_sequential() %>%
-  layer_lstm(units = 150, input_shape = c(time_steps, features)) %>%
-  layer_dropout(0.3) %>%
+  layer_lstm(units = 50, input_shape = c(time_steps, features), return_sequences = TRUE) %>%
+  layer_lstm(units = 50, return_sequences = TRUE) %>%
+  layer_lstm(units = 50) %>%
   layer_dense(units = 1)
 
 model_list[["Model 2"]]$model <- keras_model_sequential() %>%
@@ -264,12 +265,12 @@ model_df %>%
   unnest(metrics) %>%
   ggplot(aes(x = epoch, y = value, colour = data)) +
   geom_line() +
-  facet_grid(metric~name, scales = "free_y")
+  facet_grid(metric~name, scales = "free_y") +
+  labs(title = "Loss and MAE of Model 1 and Model 2")
 
 # Loss and accuracy summary
 model_df %>%
-  select(name, loss,mae) %>%
-  knitr::kable(caption = "Loss and Accuracy for 2 models")
+  select(name, loss,mae) 
 
 # Compare loss and accuracy between models 
 model_df %>%
@@ -279,7 +280,8 @@ model_df %>%
   geom_col(colour = "blue", fill = "blue", alpha = 0.2, width = 0) +
   geom_point(colour = "blue") +
   facet_wrap(~var, scales = "free_x") +
-  coord_flip()
+  coord_flip() +
+  labs(title = "Overall Loss and MAE values for Model 1 and Model 2")
 
 ```
 
