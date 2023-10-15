@@ -18,6 +18,7 @@ library(furrr)
 library(keras)
 library(zoo)
 library(purrr)
+library(gridExtra)
 ```
 
 
@@ -139,7 +140,7 @@ fc_ets <- fit_ets %>%
   forecast(h = "30 days")
 
 # Plotting
-data.frame(Date = base_test$date,
+base_performance <- data.frame(Date = base_test$date,
            Actual = base_test$avg_page_visit,
            ETS = fc_ets$.mean,
            ARIMA = fc_arima$.mean) %>%
@@ -227,19 +228,22 @@ dim(y_test)
 # Intialise the list for comparision between 2 models
 model_list <- list()
 
+
 model_list[["Model 1"]]$model <- keras_model_sequential() %>%
-  layer_lstm(units = 150, input_shape = c(time_steps, features), return_sequences = TRUE) %>%
-  layer_dropout(rate = 0.5) %>%
-  layer_lstm(units = 100, return_sequences = TRUE) %>%
-  layer_dropout(rate = 0.4) %>%
-  layer_lstm(units = 50) %>%
-  layer_dropout(rate = 0.3) %>%
+  layer_lstm(units = 200, input_shape = c(time_steps, features), return_sequences = TRUE) %>%
+  layer_lstm(units = 200, return_sequences = TRUE) %>%
+  layer_lstm(units = 200) %>%
   layer_dense(units = 1)
 
+
 model_list[["Model 2"]]$model <- keras_model_sequential() %>%
-  layer_gru(units = 150, dropout = 0.1, recurrent_dropout = 0.5,return_sequences = TRUE, input_shape = c(time_steps, features)) %>% 
-  layer_gru(units = 64, activation = "relu",dropout = 0.1, recurrent_dropout = 0.5) %>% 
+  layer_gru(units = 128, dropout = 0.1, recurrent_dropout = 0.5,return_sequences = TRUE, input_shape = c(time_steps, features)) %>% 
+  layer_gru(units = 64, dropout = 0.1, recurrent_dropout = 0.5,return_sequences = TRUE) %>% 
+  layer_gru(units = 32, activation = "relu",dropout = 0.1, recurrent_dropout = 0.5, return_sequences = TRUE) %>% 
+  layer_gru(units = 16, activation = "relu",dropout = 0.1, recurrent_dropout = 0.5) %>% 
   layer_dense(units = 1)
+
+
 
 ```
   
@@ -271,9 +275,7 @@ model_list[["Model 2"]]$fit <- model_list[["Model 2"]]$model %>%
       y_train,
       epochs = 50, # number of iteration
       batch_size = 128,
-      validation_split = 0.2,
-      callbacks = callback_early_stopping(monitor ='val_loss',
-                                          patience = 10))
+      validation_split = 0.2)
 
 ```
 
@@ -317,6 +319,7 @@ model_df %>%
   coord_flip() +
   labs(title = "Overall Loss and MAE values for Model 1 and Model 2")
 
+
 ```
 
 ```{r}
@@ -327,20 +330,18 @@ pred_2 <- model_list[["Model 2"]]$model %>% predict(x_test)
 # Denormalised the predictions
 model_performance <- data.frame(Date = test_data$date,
            Actual = test_data$avg_page_visit,
-           ETS = fc_ets$.mean,
-           ARIMA = fc_arima$.mean,
            Model_1 = pred_1,
            Model_2 = pred_2) %>%
   mutate(Model_1 = (Model_1 * scale_train[2]) + scale_train[1],
          Model_2 = (Model_2 * scale_train[2]) + scale_train[1])
 
 # Compare predictions 
-model_performance %>%
-  pivot_longer(cols = c(Actual, ETS, ARIMA, Model_1, Model_2), names_to = "Type", values_to = "Avg_Page_Visits") %>%
+NN_performance <- model_performance %>%
+  pivot_longer(cols = c(Actual, Model_1, Model_2), names_to = "Type", values_to = "Avg_Page_Visits") %>%
   ggplot()+
   geom_line(aes(x = Date, y = Avg_Page_Visits, color = Type)) + 
   labs(title = "Model Performance for Nueron Network Models")
 
-
+grid.arrange(base_performance,NN_performance, ncol = 1)
 ```
 
