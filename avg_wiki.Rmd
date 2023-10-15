@@ -1,0 +1,299 @@
+---
+title: "wikipida"
+author: "Aswin Kithalawaarachchi"
+date: "2023-09-20"
+output: html_document
+---
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(readr)
+library(tidyverse)
+library(urca)
+library(fpp3)
+library(naniar)
+library(future)
+library(furrr)
+library(keras)
+library(zoo)
+library(purrr)
+```
+
+
+```{r}
+# Load the datasets
+wiki_df <- read_csv('wikipedia.csv', col_names=FALSE)
+train_df <- read_csv('filtered_train_2.csv')
+
+# Extract the first time series from both datasets
+wiki_series <- as.numeric(wiki_df[2, -1])
+train_series <- as.numeric(train_df[2, -1])
+
+# Normalize the series
+wiki_series <- scale(wiki_series)
+train_series <- scale(train_series)
+
+# Initialize variables to store maximum correlation and its corresponding lag
+max_corr <- -1
+max_lag <- 0
+
+# Loop over possible lags and calculate correlation for each lag
+for (lag in 0:(min(length(wiki_series), length(train_series)) - 1)) {
+  wiki_subseries <- wiki_series[(lag + 1):(min(length(wiki_series), length(train_series) + lag))]
+  train_subseries <- train_series[1:(min(length(wiki_series) - lag, length(train_series)))]
+  
+  # Ensure the lengths of the series are equal before calculating the correlation
+  if(length(wiki_subseries) == length(train_subseries)) {
+    # Calculate correlation for the current lag
+    current_corr <- cor(wiki_subseries, train_subseries)
+    
+    # Update maximum correlation and its corresponding lag if the current correlation is greater
+    if (current_corr > max_corr) {
+      max_corr <- current_corr
+      max_lag <- lag
+    }
+  }
+}
+
+# Calculate the start date for the Wikipedia series based on the optimal lag
+start_date <- as.Date(names(train_df)[2]) + max_lag
+
+# Generate the date range for the Wikipedia series
+wiki_dates <- seq(start_date, by='day', length.out=ncol(wiki_df) - 1)  # Correcting the length of the date sequence
+
+# Create a new DataFrame for the Wikipedia dataset with the estimated dates as columns
+wiki_df_with_dates <- as.data.frame(
+  cbind(
+    Page=wiki_df$X1,
+    as.data.frame(
+      matrix(
+        unlist(wiki_df[-1]),
+        nrow=nrow(wiki_df),
+        byrow=T)
+      )
+    )
+  )
+
+# Assign the generated dates as column names
+colnames(wiki_df_with_dates)[-1] <- as.character(wiki_dates)
+
+# View the resulting DataFrame
+head(wiki_df_with_dates)
+
+```
+
+```{r}
+# AVERAGE 
+col_means <- colMeans(wiki_df_with_dates[,2:ncol(wiki_df_with_dates)])
+
+# Select the date column
+get_dates <- wiki_df_with_dates %>%
+  filter(Page == "Michael_J._Fox_en.wikipedia.org_all-access_all-agents") %>%
+  pivot_longer(cols = starts_with("20"), 
+               names_to = "date", 
+               values_to = "web_traffics") %>%
+  mutate(date = as.Date(date, format = "%Y-%m-%d")) %>%
+  select(date)
+
+Avg_data <- data.frame(date = get_dates,
+           avg_page_visit = col_means)
+
+
+```
+
+```{r}
+# Turn into tsibble format to check for lags
+Avg_data_tsibble <- Avg_data %>% as_tsibble(index = date)
+
+head(Avg_data_tsibble)
+
+Avg_data_tsibble %>%
+  autoplot()
+
+ACF(Avg_data_tsibble) %>% autoplot() # lag on 1,3,4
+```
+
+```{r}
+# Base Model ETS
+
+
+```
+
+
+```{r}
+# Create lag of 1,3,5
+Avg_data <- Avg_data %>%
+  mutate(lag1 = lag(avg_page_visit, n = 1),
+         lag3 = lag(avg_page_visit, n = 3),
+         lag4 = lag(avg_page_visit, n = 4))
+
+# Replace NA to 0
+Avg_data$lag1 <- ifelse(is.na(Avg_data$lag1), 0, Avg_data$lag1)
+Avg_data$lag3 <- ifelse(is.na(Avg_data$lag3), 0, Avg_data$lag3)
+Avg_data$lag4 <- ifelse(is.na(Avg_data$lag4), 0, Avg_data$lag4)
+
+# Start from 2017-09-09
+Avg_data <- Avg_data[6:nrow(Avg_data),]
+
+# Split into training and testing 
+# Forecast 30 days 
+train_data <- Avg_data[1:830,]
+test_data <- Avg_data[831:nrow(Avg_data),]
+
+dim(train_data)
+dim(test_data)
+
+# Normalize the train and test dataset
+scale_train <- c(mean(train_data$avg_page_visit), sd(train_data$avg_page_visit), mean(train_data$lag1), sd(train_data$lag1),
+                 mean(train_data$lag3), sd(train_data$lag3), mean(train_data$lag4), sd(train_data$lag4))
+scale_test <- c(mean(test_data$avg_page_visit), sd(test_data$avg_page_visit), mean(test_data$lag1), sd(test_data$lag1),
+                mean(test_data$lag3), sd(test_data$lag3),mean(test_data$lag4), sd(test_data$lag4))
+
+train_data_nom <- train_data %>%
+  mutate(avg_page_visit = (avg_page_visit - scale_train[1]) / scale_train[2]) %>%
+  mutate(lag1 = (lag1 - scale_train[3])/ scale_train[4]) %>%
+  mutate(lag3 = (lag3 - scale_train[5])/ scale_train[6]) %>%
+  mutate(lag4 = (lag4 - scale_train[7])/ scale_train[8]) 
+
+test_data_nom <- test_data %>%
+  mutate(avg_page_visit = (avg_page_visit - scale_test[1]) / scale_test[2]) %>%
+  mutate(lag1 = (lag1 - scale_test[3])/ scale_test[4]) %>%
+  mutate(lag3 = (lag3 - scale_test[5])/ scale_test[6]) %>%
+  mutate(lag4 = (lag4 - scale_test[7])/ scale_test[8])
+
+# Reshape the data into the correct format
+reshape_array <- function(data, time_steps){
+  array(data, dim = c(nrow(data), time_steps, 3))
+}
+
+time_steps <- 10    
+features <- 3 # lag1 lag3 lag4
+
+head(train_data)
+
+x_train <- reshape_array(as.matrix(train_data_nom[, 3:5]), time_steps)
+x_test <- reshape_array(as.matrix(test_data_nom[, 3:5]), time_steps)
+y_train <- as.matrix(train_data_nom[,2])
+y_test <- as.matrix(test_data_nom[,2])
+
+dim(train_data)
+dim(test_data)
+
+dim(x_train)
+dim(x_test)
+dim(y_train)
+dim(y_test)
+```
+
+
+```{r neuron network model 1}
+
+# Intialise the list for comparision between 2 models
+model_list <- list()
+
+model_list[["Model 1"]]$model <- keras_model_sequential() %>%
+  layer_lstm(units = 150, input_shape = c(time_steps, features)) %>%
+  layer_dropout(0.3) %>%
+  layer_dense(units = 1)
+
+
+model_list[["Model 2"]]$model <- keras_model_sequential() %>%
+  layer_lstm(units = 50, input_shape = c(time_steps, features), return_sequences = TRUE) %>%
+  layer_lstm(units = 50, return_sequences = TRUE) %>%
+  layer_lstm(units = 50) %>%
+  layer_dense(units = 1)
+
+```
+  
+```{r}
+model_list[["Model 1"]]$model %>%
+  compile(loss = "mean_squared_error",
+    optimizer = 'adam',
+    metric = "mae")
+
+model_list[["Model 2"]]$model %>%
+  compile(loss = "mean_squared_error",
+    optimizer = 'adam',
+    metric = "mae")
+```
+
+
+```{r train the model}
+
+model_list[["Model 1"]]$fit <- model_list[["Model 1"]]$model %>%
+  fit(x_train,
+      y_train,
+      epochs = 50, # number of iteration
+      batch_size = 128,
+      validation_split = 0.2)
+
+model_list[["Model 2"]]$fit <- model_list[["Model 2"]]$model %>%
+  fit(x_train,
+      y_train,
+      epochs = 50, # number of iteration
+      batch_size = 128,
+      validation_split = 0.2)
+
+pred_1 <- model_list[["Model 1"]]$model %>% predict(x_test)
+
+# Denormalised the predictions
+model_performance <- data.frame(Date = test_data$date,
+           Actual = test_data$avg_page_visit,
+           Pred_1 = pred_1) %>%
+  mutate(Pred_1 = (Pred_1 * scale_train[2]) + scale_train[1])
+
+
+model_performance %>%
+  pivot_longer(cols = c(Actual, Pred_1), names_to = "Type", values_to = "Avg_Page_Visits") %>%
+  ggplot()+
+  geom_line(aes(x = Date, y = Avg_Page_Visits, color = Type)) + 
+  labs(title = "Model Performance for Three Models")
+
+```
+
+
+
+```{r evaluation}
+evaluate_df <- function(model){
+  evaluate(model, x_test, y_test, verbose = 0) %>%
+    bind_rows()
+}
+
+# Convert list to data frame 
+model_df <- data_frame(
+  name = fct_inorder(names(model_list)),
+  model = map(model_list, "model"),
+  fit = map(model_list, "fit")
+) %>%
+  mutate(eval = map(model, evaluate_df)) %>%
+  unnest(eval)
+
+# Loss and accuracy plot
+model_df %>%
+  mutate(metrics = map(fit, function(x){data.frame(x)})) %>%
+  select(name, metrics) %>%
+  unnest(metrics) %>%
+  ggplot(aes(x = epoch, y = value, colour = data)) +
+  geom_line() +
+  facet_grid(metric~name, scales = "free_y")
+
+# Loss and accuracy summary
+model_df %>%
+  select(name, loss,mae) %>%
+  knitr::kable(caption = "Loss and Accuracy for 2 models")
+
+# Compare loss and accuracy between models 
+model_df %>%
+  select(name, loss,mae) %>%
+  gather(var,val, -name) %>%
+  ggplot(aes(x = name, y = val)) +
+  geom_col(colour = "blue", fill = "blue", alpha = 0.2, width = 0) +
+  geom_point(colour = "blue") +
+  facet_wrap(~var, scales = "free_x") +
+  coord_flip()
+
+```
+
+
+
