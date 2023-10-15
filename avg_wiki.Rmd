@@ -17,8 +17,8 @@ library(future)
 library(furrr)
 library(keras)
 library(zoo)
-library(purrr)
 library(gridExtra)
+library(Metrics)
 ```
 
 
@@ -119,7 +119,7 @@ ACF(Avg_data_tsibble) %>%
 ```
 
 ```{r}
-# Base Model ETS and ARIMA
+# Benchmark Model ETS and ARIMA
 # Split the data into training and test sets
 base_train <- Avg_data_tsibble %>% filter(date < as.Date("2019-12-18"))
 base_test <- Avg_data_tsibble %>% filter(date >= as.Date("2019-12-18"))
@@ -147,7 +147,25 @@ base_performance <- data.frame(Date = base_test$date,
   pivot_longer(cols = c(Actual, ETS, ARIMA), names_to = "Type", values_to = "Avg_Page_Visits") %>%
   ggplot()+
   geom_line(aes(x = Date, y = Avg_Page_Visits, color = Type)) + 
-  labs(title = "Model Performance for Base Models")
+  labs(title = "Model Performance for Benchmark Models")
+
+# Ensure that the forecasted values and the test set have the same date range
+fc_arima <- fc_arima %>% filter(date %in% base_test$date)
+fc_ets <- fc_ets %>% filter(date %in% base_test$date)
+
+# Combine actual and forecasted values into a single tibble
+results <- data.frame(Date = base_test$date,
+           Actual = base_test$avg_page_visit,
+           ETS = fc_ets$.mean,
+           ARIMA = fc_arima$.mean)
+
+# Calculating MSE and MAE for 
+data.frame(ets_mse = mse(results$Actual,results$ETS),
+           ets_mae = mae(results$Actual,results$ETS),
+           ets_rmse = rmse(results$Actual,results$ETS),
+           arima_mse = mse(results$Actual,results$ARIMA),
+           arima_mae = mae(results$Actual,results$ARIMA),
+           arima_rmse = rmse(results$Actual,results$ARIMA))
 
 
 ```
@@ -212,9 +230,6 @@ x_train <- reshape_array(as.matrix(train_data_nom[, 3:5]), time_steps, features)
 x_test <- reshape_array(as.matrix(test_data_nom[, 3:5]), time_steps, features)
 y_train <- as.matrix(train_data_nom[,2])
 y_test <- as.matrix(test_data_nom[,2])
-
-dim(train_data)
-dim(test_data)
 
 dim(x_train)
 dim(x_test)
@@ -306,7 +321,9 @@ model_df %>%
 
 # Loss and accuracy summary
 model_df %>%
-  select(name, loss,mae) 
+  select(name, loss,mae) %>% 
+  mutate(loss = (loss * scale_train[2]) + scale_train[1],
+         mae = (mae * scale_train[2]) + scale_train[1])
 
 # Compare loss and accuracy between models 
 model_df %>%
@@ -332,16 +349,25 @@ model_performance <- data.frame(Date = test_data$date,
            Actual = test_data$avg_page_visit,
            Model_1 = pred_1,
            Model_2 = pred_2) %>%
-  mutate(Model_1 = (Model_1 * scale_train[2]) + scale_train[1],
-         Model_2 = (Model_2 * scale_train[2]) + scale_train[1])
+  mutate(Model_1 = (Model_1 * scale_test[2]) + scale_test[1],
+         Model_2 = (Model_2 * scale_test[2]) + scale_test[1])
 
 # Compare predictions 
 NN_performance <- model_performance %>%
   pivot_longer(cols = c(Actual, Model_1, Model_2), names_to = "Type", values_to = "Avg_Page_Visits") %>%
   ggplot()+
   geom_line(aes(x = Date, y = Avg_Page_Visits, color = Type)) + 
-  labs(title = "Model Performance for Nueron Network Models")
+  labs(title = "Model Performance for Nueral Network Models")
 
 grid.arrange(base_performance,NN_performance, ncol = 1)
+```
+```{r}
+# Compare evaluation metrics
+data.frame(m1_mse = mse(model_performance$Actual,model_performance$Model_1),
+           m1_mae = mae(model_performance$Actual,model_performance$Model_1),
+           m1_rmse = rmse(model_performance$Actual,model_performance$Model_1),
+           m2_mse = mse(model_performance$Actual,model_performance$Model_2),
+           m2_mae = mae(model_performance$Actual,model_performance$Model_2),
+           m2_rmse = rmse(model_performance$Actual,model_performance$Model_2))
 ```
 
